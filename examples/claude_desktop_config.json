@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "claudeCuis": {
+      "command": "python3",
+      "args": ["/path/to/claudeCuis_mcp.py"],
+      "env": {
+        "MQTT_BROKER": "your-mqtt-broker-host",
+        "MQTT_PORT": "1883",
+        "MQTT_USERNAME": "your-username",
+        "MQTT_PASSWORD": "your-password",
+        "CLAUDE_IMAGE_ID": "dev1",
+        "CLAUDE_TIMEOUT": "30"
+      }
+    }
+  }
+}
