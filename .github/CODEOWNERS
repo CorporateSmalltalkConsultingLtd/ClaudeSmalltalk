@@ -1,0 +1,11 @@
+# CODEOWNERS - Automatically request reviews from code owners
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo
+* @johnmci
+
+# Smalltalk packages
+*.pck.st @johnmci
+
+# Python MCP bridge
+*.py @johnmci
