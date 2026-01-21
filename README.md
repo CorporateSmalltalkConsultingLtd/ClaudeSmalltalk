@@ -1,28 +1,103 @@
 # ClaudeCuis
 
-MQTT-based interface for Claude to interact with a live Cuis Smalltalk image.
+Interface for Claude to interact with a live Cuis Smalltalk image via MCP (Model Context Protocol).
 
-This project enables Claude (via MCP - Model Context Protocol) to evaluate Smalltalk code, browse classes, define methods, and more in a running Cuis Smalltalk environment.
+This project enables Claude to evaluate Smalltalk code, browse classes, define methods, and more in a running Cuis Smalltalk environment.
 
 Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
-## Architecture
+## Two MCP Server Options
+
+### Option B: Native Smalltalk MCP (RECOMMENDED)
+
+```
+┌─────────────┐     MCP/stdio     ┌─────────────────┐
+│   Claude    │ ◄────────────────► │ Cuis Smalltalk  │
+│  (Desktop   │    (JSON Lines)    │   (headless)    │
+│  or Code)   │                    │   MCPServer     │
+└─────────────┘                    └─────────────────┘
+```
+
+- **Simplest setup** - No Python, no MQTT broker required
+- Claude spawns the Cuis image directly
+- 12 tools available (saveImage intentionally excluded for safety)
+
+### Option A: Python/MQTT Bridge
 
 ```
 ┌─────────────┐     MCP      ┌─────────────────┐     MQTT      ┌─────────────────┐
 │   Claude    │ ◄──────────► │  claudeCuis_mcp │ ◄───────────► │ Cuis Smalltalk  │
 │  (Desktop   │   (stdio)    │    (Python)     │  (pub/sub)    │     Image       │
-│  or Code)   │              │                 │               │ ClaudeHandler │
+│  or Code)   │              │                 │               │ ClaudeHandler   │
 └─────────────┘              └─────────────────┘               └─────────────────┘
 ```
 
+- Good for **development** (image stays running with GUI)
+- Requires Python 3.10+ and MQTT broker
+
 ## Prerequisites
 
+**For Option B (Native MCP - Recommended):**
+- **Cuis Smalltalk VM** (Squeak VM or Cog VM)
+- **ClaudeCuis.image** (provided, or build your own)
+
+**For Option A (Python/MQTT Bridge):**
 - **Python 3.10+** (MCP SDK requirement)
 - **MQTT Broker** (e.g., Mosquitto) accessible from both Claude and the Smalltalk image
 - **Cuis Smalltalk** image with Network-Kernel package
 
-## Installation
+---
+
+## Installation: Option B (Native MCP - Recommended)
+
+### 1. Configure Claude
+
+#### For Claude Code (CLI)
+
+Add to `~/.claude.json` or project `.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "cuisDirect": {
+      "type": "stdio",
+      "command": "/path/to/CuisVM.app/Contents/MacOS/Squeak",
+      "args": ["/path/to/ClaudeCuis.image", "--mcp"]
+    }
+  }
+}
+```
+
+#### For Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or equivalent:
+
+```json
+{
+  "mcpServers": {
+    "cuisDirect": {
+      "command": "/path/to/CuisVM.app/Contents/MacOS/Squeak",
+      "args": ["/path/to/ClaudeCuis.image", "--mcp"]
+    }
+  }
+}
+```
+
+### 2. (Optional) Build Your Own Image
+
+If you want to build your own image instead of using the provided `ClaudeCuis.image`:
+
+```smalltalk
+Feature require: 'JSON'.
+CodePackageFile installPackage: '/path/to/MCP-Server.pck.st' asFileEntry.
+Smalltalk saveImage.
+```
+
+The MCP server starts automatically when the image is launched with `--mcp`.
+
+---
+
+## Installation: Option A (Python/MQTT Bridge)
 
 ### 1. Set Up Python Environment
 
@@ -143,7 +218,6 @@ This enables `/smalltalk` command and auto-invocation for Smalltalk tasks.
 | `smalltalk_subclasses` | Get immediate subclasses of a class |
 | `smalltalk_list_categories` | List all system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
-| `smalltalk_save_image` | Save the Smalltalk image |
 
 ## Usage Examples
 
@@ -222,10 +296,12 @@ MQTTConnectionTest buildSuite run inspect.
 
 | File | Description |
 |------|-------------|
-| `claudeCuis_mcp.py` | Python MCP bridge server |
-| `requirements.txt` | Python dependencies |
-| `MQTT-Cuis.pck.st` | MQTT client library for Cuis |
-| `ClaudeCuis.pck.st` | Claude handler |
+| `MCP-Server.pck.st` | Native MCP server for Cuis (Option B) |
+| `ClaudeCuis.image` | Pre-built image with MCP server |
+| `claudeCuis_mcp.py` | Python MCP bridge server (Option A) |
+| `requirements.txt` | Python dependencies (Option A) |
+| `MQTT-Cuis.pck.st` | MQTT client library for Cuis (Option A) |
+| `ClaudeCuis.pck.st` | Claude handler (Option A) |
 | `*-Tests.pck.st` | Test packages |
 | `examples/` | Configuration templates |
 

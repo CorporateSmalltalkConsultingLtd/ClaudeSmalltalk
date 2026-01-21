@@ -25,7 +25,6 @@ You have access to a **live Cuis Smalltalk image** via the claudeCuis MCP server
 | `smalltalk_subclasses` | Get immediate subclasses of a class |
 | `smalltalk_list_categories` | List all system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
-| `smalltalk_save_image` | Save the Smalltalk image |
 
 ## Examples
 

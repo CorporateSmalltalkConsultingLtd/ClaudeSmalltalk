@@ -303,14 +303,6 @@ async def list_tools() -> list[Tool]:
                 "required": ["category"]
             }
         ),
-        Tool(
-            name="smalltalk_save_image",
-            description="Save the Smalltalk image to disk. Use after making changes you want to persist.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            }
-        ),
     ]
 
 
@@ -332,7 +324,6 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         "smalltalk_subclasses": "subclasses",
         "smalltalk_list_categories": "listCategories",
         "smalltalk_classes_in_category": "classesInCategory",
-        "smalltalk_save_image": "saveImage",
     }
 
     action = tool_to_action.get(name)
