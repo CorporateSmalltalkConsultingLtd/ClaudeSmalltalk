@@ -1,0 +1,5 @@
+# Python dependencies for Option A (Python/MQTT Bridge)
+# Requires Python 3.10+
+
+paho-mqtt>=2.0.0
+mcp>=1.0.0

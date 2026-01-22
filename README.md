@@ -6,7 +6,7 @@ This project enables Claude to evaluate Smalltalk code, browse classes, define m
 
 Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
-## Three MCP Server Options
+## Four MCP Server Options
 
 ### Option B: Cuis Native MCP (RECOMMENDED for Cuis)
 
@@ -50,6 +50,19 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 - Good for **development** (image stays running with GUI)
 - Requires Python 3.10+ and MQTT broker
 
+### Option D: OpenAI Bridge (ChatGPT)
+
+```
+┌─────────────┐     HTTPS     ┌─────────────────┐    stdio/MCP    ┌─────────────────┐
+│   OpenAI    │ ◄────────────► │  openai_mcp.py  │ ◄──────────────► │ Squeak 6.0      │
+│   (Cloud)   │   (API calls)  │  (Python)       │   (JSON-RPC)    │   MCPServer     │
+└─────────────┘                └─────────────────┘                 └─────────────────┘
+```
+
+- Enables **ChatGPT** to execute Smalltalk code via the same 12 tools
+- Requires Python 3.10+ and OpenAI API key
+- See [OPENAI-SETUP.md](OPENAI-SETUP.md) for detailed instructions
+
 ## Prerequisites
 
 **For Option B (Cuis Native MCP):**
@@ -65,6 +78,11 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 - **Python 3.10+** (MCP SDK requirement)
 - **MQTT Broker** (e.g., Mosquitto) accessible from both Claude and the Smalltalk image
 - **Cuis Smalltalk** image with Network-Kernel package
+
+**For Option D (OpenAI Bridge):**
+- **Python 3.10+** (OpenAI SDK requirement)
+- **OpenAI API Key** from https://platform.openai.com/api-keys
+- **Squeak 6.0** with MCP server (same as Option C)
 
 ---
 
@@ -251,6 +269,41 @@ cp examples/SKILL.md .claude/skills/smalltalk/
 
 This enables `/smalltalk` command and auto-invocation for Smalltalk tasks.
 
+---
+
+## Installation: Option D (OpenAI Bridge)
+
+See [OPENAI-SETUP.md](OPENAI-SETUP.md) for detailed step-by-step instructions.
+
+### Quick Start
+
+1. **Set up Squeak MCP server** (same as Option C)
+2. **Install Python dependencies**:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install openai>=1.0.0
+```
+
+3. **Set environment variables**:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export SQUEAK_VM_PATH="/path/to/Squeak"
+export SQUEAK_IMAGE_PATH="/path/to/ClaudeSqueak.image"
+```
+
+4. **Run the bridge**:
+
+```bash
+# Interactive mode
+python openai_mcp.py
+
+# Single query mode
+python openai_mcp.py "Evaluate 3 factorial in Smalltalk"
+```
+
 ## Available Tools
 
 | Tool | Description |
@@ -356,7 +409,10 @@ MQTTConnectionTest buildSuite run inspect.
 | `ClaudeCuis.image` | Pre-built image with MCP server (Cuis) |
 | `SQUEAK-SETUP.md` | Step-by-step guide for Squeak setup |
 | `claudeCuis_mcp.py` | Python MCP bridge server (Option A) |
-| `requirements.txt` | Python dependencies (Option A) |
+| `openai_mcp.py` | OpenAI bridge for ChatGPT (Option D) |
+| `openai_tools.py` | OpenAI tool definitions (Option D) |
+| `OPENAI-SETUP.md` | Step-by-step guide for OpenAI setup |
+| `requirements.txt` | Python dependencies (Options A & D) |
 | `MQTT-Cuis.pck.st` | MQTT client library for Cuis (Option A) |
 | `ClaudeCuis.pck.st` | Claude handler (Option A) |
 | `*-Tests.pck.st` | Test packages |
