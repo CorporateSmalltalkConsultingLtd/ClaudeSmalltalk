@@ -1,14 +1,14 @@
-# ClaudeCuis
+# ClaudeSmalltalk
 
-Interface for Claude to interact with a live Cuis Smalltalk image via MCP (Model Context Protocol).
+Interface for Claude to interact with live Smalltalk images (Cuis and Squeak) via MCP (Model Context Protocol).
 
-This project enables Claude to evaluate Smalltalk code, browse classes, define methods, and more in a running Cuis Smalltalk environment.
+This project enables Claude to evaluate Smalltalk code, browse classes, define methods, and more in a running Smalltalk environment.
 
 Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
-## Two MCP Server Options
+## Three MCP Server Options
 
-### Option B: Native Smalltalk MCP (RECOMMENDED)
+### Option B: Cuis Native MCP (RECOMMENDED for Cuis)
 
 ```
 ┌─────────────┐     MCP/stdio     ┌─────────────────┐
@@ -21,6 +21,21 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 - **Simplest setup** - No Python, no MQTT broker required
 - Claude spawns the Cuis image directly
 - 12 tools available (saveImage intentionally excluded for safety)
+
+### Option C: Squeak Native MCP (RECOMMENDED for Squeak)
+
+```
+┌─────────────┐     MCP/stdio     ┌─────────────────┐
+│   Claude    │ ◄────────────────► │ Squeak 6.0      │
+│  (Desktop   │    (JSON Lines)    │   (with GUI)    │
+│  or Code)   │                    │   MCPServer     │
+└─────────────┘                    └─────────────────┘
+```
+
+- **Responsive GUI** - Squeak GUI remains responsive during MCP operations
+- Uses OSProcess with `BufferedAsyncFileReadStream` for non-blocking stdio
+- 12 tools available (same as Cuis)
+- Server-side processing: 0-3ms per request
 
 ### Option A: Python/MQTT Bridge
 
@@ -37,9 +52,14 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
 ## Prerequisites
 
-**For Option B (Native MCP - Recommended):**
+**For Option B (Cuis Native MCP):**
 - **Cuis Smalltalk VM** (Squeak VM or Cog VM)
 - **ClaudeCuis.image** (provided, or build your own)
+
+**For Option C (Squeak Native MCP):**
+- **Squeak 6.0** from https://squeak.org/downloads/
+- **OSProcess package** (installed via Monticello)
+- See [SQUEAK-SETUP.md](SQUEAK-SETUP.md) for detailed instructions
 
 **For Option A (Python/MQTT Bridge):**
 - **Python 3.10+** (MCP SDK requirement)
@@ -48,7 +68,7 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
 ---
 
-## Installation: Option B (Native MCP - Recommended)
+## Installation: Option B (Cuis Native MCP)
 
 ### 1. Configure Claude
 
@@ -94,6 +114,35 @@ Smalltalk saveImage.
 ```
 
 The MCP server starts automatically when the image is launched with `--mcp`.
+
+---
+
+## Installation: Option C (Squeak Native MCP)
+
+See [SQUEAK-SETUP.md](SQUEAK-SETUP.md) for detailed step-by-step instructions.
+
+### Quick Start
+
+1. **Download Squeak 6.0** from https://squeak.org/downloads/
+2. **Install OSProcess** via Monticello Browser (repository: `http://www.squeaksource.com/OSProcess`)
+3. **File in MCP-Server-Squeak.st**
+4. **Register startup**: `Smalltalk addToStartUpList: MCPServer`
+5. **Save image** as `ClaudeSqueak6.0.image`
+6. **Configure Claude Code**:
+
+```json
+{
+  "mcpServers": {
+    "squeakDirect": {
+      "type": "stdio",
+      "command": "/path/to/Squeak6.0.app/Contents/MacOS/Squeak",
+      "args": ["/path/to/ClaudeSqueak6.0.image", "--mcp"]
+    }
+  }
+}
+```
+
+**Note**: The Squeak image is NOT provided in this repository. Users build their own from a fresh Squeak 6.0 download, ensuring they have the latest VM and can customize their environment.
 
 ---
 
@@ -292,12 +341,20 @@ MQTTConnectionTest buildSuite run inspect.
 - Verify the `imageId` matches between config and handler
 - Check MQTT subscription topics have proper ACL access
 
+### Squeak GUI Freezes (Option C)
+
+- Verify OSProcess is installed: `OSProcess thisOSProcess` should return a UnixProcess
+- Check that `BufferedAsyncFileReadStream` is being used by MCPTransport
+- See [SQUEAK-SETUP.md](SQUEAK-SETUP.md) for troubleshooting details
+
 ## Files
 
 | File | Description |
 |------|-------------|
 | `MCP-Server.pck.st` | Native MCP server for Cuis (Option B) |
-| `ClaudeCuis.image` | Pre-built image with MCP server |
+| `MCP-Server-Squeak.st` | Native MCP server for Squeak 6.0 (Option C) |
+| `ClaudeCuis.image` | Pre-built image with MCP server (Cuis) |
+| `SQUEAK-SETUP.md` | Step-by-step guide for Squeak setup |
 | `claudeCuis_mcp.py` | Python MCP bridge server (Option A) |
 | `requirements.txt` | Python dependencies (Option A) |
 | `MQTT-Cuis.pck.st` | MQTT client library for Cuis (Option A) |
