@@ -36,12 +36,28 @@ When using the Python/MQTT bridge:
 - Configure broker ACLs to restrict topic access
 - The `.gitignore` excludes `.claude/settings.local.json` to prevent credential leaks
 
-### Native MCP Server (Option B)
+### Native Cuis MCP Server (Option B)
 
-When using the native Smalltalk MCP server:
+When using the native Cuis MCP server:
 - The `saveImage` tool is intentionally excluded to prevent image corruption
 - The MCP server runs headless and accepts commands from Claude only via stdio
 - No network ports are opened by the MCP server itself
+
+### Native Squeak MCP Server (Option C)
+
+When using the native Squeak MCP server:
+- Same security model as Option B (stdio only, no network ports)
+- Uses OSProcess for stdio handling
+- The `saveImage` tool is intentionally excluded
+- Changes file is redirected to `/dev/null` to support multiple concurrent sessions
+
+### OpenAI Bridge (Option D)
+
+When using the OpenAI bridge (`openai_mcp.py`):
+- API key must be stored in `OPENAI_API_KEY` environment variable (never in code)
+- No incoming network connections - outbound HTTPS to OpenAI API only
+- Spawns Squeak MCP locally (same security model as Option C)
+- **Privacy note**: All Smalltalk code sent for execution is transmitted to OpenAI's servers
 
 ### General Recommendations
 

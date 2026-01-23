@@ -33,9 +33,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 from typing import Optional
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 from openai_tools import OPENAI_TOOLS, FUNCTION_TO_MCP_TOOL
 
@@ -223,14 +224,29 @@ Explain results clearly and provide helpful context about Smalltalk concepts."""
             # Map OpenAI function name to MCP tool name
             mcp_tool_name = FUNCTION_TO_MCP_TOOL.get(tool_name, tool_name)
 
+            # Print diagnostic info
+            print(f"\n[Tool] {tool_name}")
+            if tool_name == "smalltalk_evaluate" and "code" in arguments:
+                print(f"[Code] {arguments['code']}")
+            elif tool_name == "smalltalk_browse" and "className" in arguments:
+                print(f"[Class] {arguments['className']}")
+            elif tool_name == "smalltalk_method_source":
+                print(f"[Method] {arguments.get('className', '?')}>>{arguments.get('selector', '?')}")
+            else:
+                print(f"[Args] {arguments}")
+
             try:
                 result_text = self.mcp.call_tool(mcp_tool_name, arguments)
+                # Print truncated result
+                preview = result_text[:200] + "..." if len(result_text) > 200 else result_text
+                print(f"[Result] {preview}")
                 results.append({
                     "tool_call_id": tool_call.id,
                     "role": "tool",
                     "content": result_text,
                 })
             except Exception as e:
+                print(f"[Error] {str(e)}")
                 results.append({
                     "tool_call_id": tool_call.id,
                     "role": "tool",
@@ -257,12 +273,25 @@ Explain results clearly and provide helpful context about Smalltalk concepts."""
 
         # Call OpenAI with tools
         while True:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=self.conversation_history,
-                tools=OPENAI_TOOLS,
-                tool_choice="auto",
-            )
+            # Retry loop for rate limit errors
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=self.conversation_history,
+                        tools=OPENAI_TOOLS,
+                        tool_choice="auto",
+                    )
+                    break  # Success, exit retry loop
+                except RateLimitError as e:
+                    if attempt < max_retries - 1:
+                        # Exponential backoff: 0.5s, 1s, 2s, 4s
+                        wait_time = 0.5 * (2 ** attempt)
+                        print(f"Rate limit hit, waiting {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        raise  # Re-raise on final attempt
 
             assistant_message = response.choices[0].message
 

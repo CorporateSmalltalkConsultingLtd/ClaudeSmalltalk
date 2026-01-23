@@ -1,13 +1,18 @@
 ---
 name: smalltalk
-description: Interact with live Cuis Smalltalk image. Use for evaluating Smalltalk code, browsing classes, viewing method source, defining classes/methods, querying hierarchy and categories.
-allowed-tools: claudeCuis/.*
+description: Interact with live Smalltalk image (Cuis or Squeak). Use for evaluating Smalltalk code, browsing classes, viewing method source, defining classes/methods, querying hierarchy and categories.
+allowed-tools: squeakDirect/.*|cuisDirect/.*|claudeCuis/.*
 user-invocable: true
 ---
 
 # Smalltalk Development Mode
 
-You have access to a **live Cuis Smalltalk image** via the claudeCuis MCP server.
+You have access to a **live Smalltalk image** via the MCP server (any of the four options).
+
+**Note:** The MCP server name in tool calls depends on your configuration:
+- `squeakDirect` - Native Squeak MCP (Option C, recommended)
+- `cuisDirect` - Native Cuis MCP (Option B)
+- `claudeCuis` - Python/MQTT bridge (Option A)
 
 ## Available Tools
 
