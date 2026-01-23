@@ -1,6 +1,6 @@
-# Contributing to ClaudeCuis
+# Contributing to ClaudeSmalltalk
 
-Thank you for your interest in contributing to ClaudeCuis!
+Thank you for your interest in contributing to ClaudeSmalltalk!
 
 ## Certificate of Origin
 
@@ -52,9 +52,9 @@ MQTTConnectionTest buildSuite run inspect.
 - Add method comments for non-obvious behavior
 - Use `self` for instance methods, `self class` for class-side access
 
-### Cuis-Specific Notes
+### Cuis/Squeak-Specific Notes
 
-Cuis is not Pharo/Squeak:
+Cuis and Squeak have some differences from Pharo:
 
 ### Python Style (for MCP bridge)
 
@@ -66,9 +66,12 @@ Cuis is not Pharo/Squeak:
 
 | Package | Purpose |
 |---------|---------|
-| `MCP-Server.pck.st` | Native MCP server (Option B) |
+| `MCP-Server.pck.st` | Native MCP server for Cuis (Option B) |
+| `MCP-Server-Squeak.st` | Native MCP server for Squeak 6.0 (Option C) |
+| `openai_mcp.py` | OpenAI bridge for ChatGPT (Option D) |
+| `openai_tools.py` | OpenAI tool definitions |
 | `MQTT-Cuis.pck.st` | MQTT client library |
-| `ClaudeCuis.pck.st` | Claude handler for MQTT bridge |
+| `ClaudeCuis.pck.st` | Claude handler for MQTT bridge (Option A) |
 | `*-Tests.pck.st` | Test packages |
 
 ## Questions?
