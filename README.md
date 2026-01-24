@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.johnmci/ClaudeSmalltalk -->
 # ClaudeSmalltalk
 
 Interface for Claude to interact with live Smalltalk images (Cuis and Squeak) via MCP (Model Context Protocol).

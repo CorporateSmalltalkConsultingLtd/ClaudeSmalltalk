@@ -18,3 +18,8 @@ build/
 
 # Local configuration (may contain credentials)
 .claude/settings.local.json
+.mcpregistry_github_token
+.mcpregistry_registry_token
+mcp-publisher
+dist/
+*.egg-info/
