@@ -1,9 +1,10 @@
-name”: “smalltalk-cuis-mcp”,
-“version”: “1.0.0”,
-“description”: “MCP server enabling Claude to interact with live Cuis Smalltalk images for conversational programming—evaluate code, browse classes, define methods, and navigate the system”,
+{
+“name”: “claude-smalltalk”,
+“version”: “1.2.0”,
+“description”: “MCP server enabling Claude and OpenAI to interact with live Smalltalk images (Cuis and Squeak) for conversational programming—evaluate code, browse classes, define methods, and navigate the system”,
 “author”: “Corporate Smalltalk Consulting Ltd”,
 “license”: “MIT”,
-“repository”: “https://github.com/CorporateSmalltalkConsultingLtd/SmalltalkCuisMCP”,
+“repository”: “https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk”,
 “homepage”: “https://www.smalltalkconsulting.com/”,
 “tools”: [
 {
@@ -183,7 +184,7 @@ name”: “smalltalk-cuis-mcp”,
 “configuration”: {
 “transport”: “stdio”,
 “runtime”: “python”,
-“entrypoint”: “clawdbot_mcp.py”,
+“entrypoint”: “claudeCuis_mcp.py”,
 “env”: {
 “MQTT_BROKER”: {
 “description”: “MQTT broker hostname”,
@@ -193,11 +194,11 @@ name”: “smalltalk-cuis-mcp”,
 “description”: “MQTT broker port”,
 “default”: “1883”
 },
-“CLAWDBOT_IMAGE_ID”: {
+“CLAUDE_IMAGE_ID”: {
 “description”: “Target Smalltalk image identifier for routing”,
 “default”: “dev1”
 },
-“CLAWDBOT_TIMEOUT”: {
+“CLAUDE_TIMEOUT”: {
 “description”: “Response timeout in seconds”,
 “default”: “30”
 }
@@ -206,14 +207,19 @@ name”: “smalltalk-cuis-mcp”,
 “keywords”: [
 “smalltalk”,
 “cuis”,
+“squeak”,
 “cuis-smalltalk”,
 “live-programming”,
 “ide”,
 “conversational-programming”,
 “development-tools”,
-“mqtt”
+“mqtt”,
+“openai”,
+“claude”,
+“mcp”
 ],
 “categories”: [
 “Development Tools”,
 “Programming Languages”
 ]
+}
