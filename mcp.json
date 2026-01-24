@@ -1,5 +1,4 @@
-{
-“name”: “smalltalk-cuis-mcp”,
+name”: “smalltalk-cuis-mcp”,
 “version”: “1.0.0”,
 “description”: “MCP server enabling Claude to interact with live Cuis Smalltalk images for conversational programming—evaluate code, browse classes, define methods, and navigate the system”,
 “author”: “Corporate Smalltalk Consulting Ltd”,
@@ -218,4 +217,3 @@
 “Development Tools”,
 “Programming Languages”
 ]
-}
