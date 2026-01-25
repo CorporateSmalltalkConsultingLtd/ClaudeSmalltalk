@@ -505,7 +505,8 @@ toolDefineClass: args
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
 toolDefineMethod: args
-	"Define or modify a method on a class"
+	"Define or modify a method on a class.
+	 Uses compileSilently: to avoid UI dialogs in headless mode."
 	| className source category class |
 	className := args at: 'className' ifAbsent: [ '' ].
 	source := args at: 'source' ifAbsent: [ '' ].
@@ -514,7 +515,7 @@ toolDefineMethod: args
 	source isEmpty ifTrue: [ self error: 'No source provided' ].
 	class := Smalltalk at: className asSymbol ifAbsent: [
 		self error: 'Class not found: ', className ].
-	class compile: source classified: category.
+	class compileSilently: source classified: category.
 	^ 'Method defined successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
@@ -619,6 +620,15 @@ startUp: resuming
 	args := Smalltalk arguments.
 	(args includes: '--mcp') ifTrue: [
 		self startServer ].! !
+
+!MCPServer class methodsFor: 'version' stamp: 'jmm 1/25/2026 18:20'!
+version
+	"Return the MCP server version number.
+	 Increment when making changes that external tools should detect.
+	 Version history:
+	   1 - Initial version
+	   2 - Fixed toolDefineMethod: to use compileSilently: for headless operation"
+	^ 2! !
 
 !MCPServer class methodsFor: 'instance creation' stamp: 'Claude 1/21/2026 12:00'!
 startServer
