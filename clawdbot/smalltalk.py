@@ -266,25 +266,27 @@ def debug_squeak():
     
     xvfb.terminate()
     
-    # Filter output
-    lines = output.split('\n')
-    # Find stack trace portion
-    stack_lines = []
-    in_stack = False
-    for line in lines:
-        if '>>#' in line or '**Stack' in line or '(SIGUSR1)' in line:
-            in_stack = True
-        if in_stack:
-            stack_lines.append(line)
-        if '(SIGUSR1)' in line:
-            break
+    # Filter out pthread warning boilerplate, show everything else
+    skip_patterns = [
+        'pthread_setschedparam',
+        'heartbeat thread',
+        'higher priority',
+        'security/limits',
+        'squeak mailing',
+        'log out and log',
+        'opensmalltalk-vm',
+        'cat <<END',
+        'rtprio',
+    ]
     
-    if stack_lines:
-        print("\n📋 Stack trace:")
-        print('\n'.join(stack_lines[-40:]))  # Last 40 lines
-    else:
-        print("\n⚠️ No stack trace captured. Full output:")
-        print('\n'.join(lines[-30:]))
+    lines = output.split('\n')
+    filtered = []
+    for line in lines:
+        if not any(p in line for p in skip_patterns):
+            filtered.append(line)
+    
+    print("\n📋 Full stack trace:")
+    print('\n'.join(filtered))
     
     return True
 
