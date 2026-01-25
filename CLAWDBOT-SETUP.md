@@ -125,6 +125,27 @@ chmod +x ~/Squeak6.0-*/bin/squeak
 - Check that `--mcp` flag triggers the server
 - Verify xvfb is working: `xvfb-run -a echo "works"`
 
+### Debugging a hung system with screenshots
+
+If the MCP server isn't responding, Squeak may be blocked on a dialog (e.g., missing sources file). Capture a screenshot of the virtual display:
+
+```bash
+# Start Xvfb on display :99
+export DISPLAY=:99
+Xvfb :99 -screen 0 1024x768x24 &
+
+# Start Squeak
+/path/to/squeak ~/ClaudeSqueak.image --mcp &
+
+# Wait a few seconds, then capture screenshot
+sleep 5
+import -window root -display :99 /tmp/squeak_debug.png
+
+# View the screenshot to see what's blocking
+```
+
+Requires `imagemagick` (`sudo apt install imagemagick`).
+
 ### pthread_setschedparam warning
 This is harmless. To suppress, create:
 ```bash
