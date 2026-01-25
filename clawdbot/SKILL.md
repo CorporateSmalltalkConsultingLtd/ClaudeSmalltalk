@@ -63,6 +63,7 @@ python3 smalltalk.py delete-class Counter
 | Command | Description |
 |---------|-------------|
 | `--check` | Verify VM/image paths and dependencies |
+| `--debug` | Debug hung system (sends SIGUSR1, captures stack trace) |
 | `evaluate <code>` | Execute Smalltalk code, return result |
 | `browse <class>` | Get class metadata (superclass, ivars, methods) |
 | `method-source <class> <selector>` | View method source code |
