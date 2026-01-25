@@ -8,9 +8,23 @@ metadata: {"clawdbot":{"emoji":"💎","requires":{"bins":["python3","xvfb-run"]}
 
 Execute Smalltalk code and browse live Squeak/Cuis images via MCP.
 
+## Prerequisites
+
+**Get the ClaudeSmalltalk repo first:**
+
+```bash
+git clone https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk.git
+```
+
+This repo contains:
+- MCP server code for Squeak (`MCP-Server-Squeak.st`)
+- Setup documentation (`SQUEAK-SETUP.md`, `CLAWDBOT-SETUP.md`)
+- This Clawdbot skill (`clawdbot/`)
+
 ## Setup
 
-See [CLAWDBOT-SETUP.md](../CLAWDBOT-SETUP.md) for installation instructions.
+1. **Set up Squeak with MCP server** — see [SQUEAK-SETUP.md](https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk/blob/main/SQUEAK-SETUP.md)
+2. **Configure Clawdbot** — see [CLAWDBOT-SETUP.md](https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk/blob/main/CLAWDBOT-SETUP.md)
 
 ## Usage
 
