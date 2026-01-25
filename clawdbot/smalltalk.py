@@ -222,10 +222,12 @@ class MCPClient:
 
 
 def debug_squeak():
-    """Start Squeak, send SIGUSR1, capture stack trace and screenshot."""
+    """Start Squeak, send SIGUSR1, capture stack trace, screenshot, and generate HTML report."""
     import signal
     import time
     import platform
+    import base64
+    from datetime import datetime
     
     vm_path, image_path = get_paths()
     if not vm_path or not image_path:
@@ -255,6 +257,7 @@ def debug_squeak():
     
     # Capture screenshot on Linux
     screenshot_path = None
+    screenshot_b64 = None
     if platform.system() == "Linux" and shutil.which("import"):
         screenshot_path = "/tmp/squeak_debug.png"
         subprocess.run(
@@ -262,7 +265,9 @@ def debug_squeak():
             capture_output=True, timeout=10
         )
         if os.path.exists(screenshot_path):
-            print(f"📸 Screenshot saved: {screenshot_path}")
+            print(f"📸 Screenshot captured")
+            with open(screenshot_path, 'rb') as f:
+                screenshot_b64 = base64.b64encode(f.read()).decode()
         else:
             print("⚠️  Screenshot capture failed")
             screenshot_path = None
@@ -281,7 +286,7 @@ def debug_squeak():
     
     xvfb.terminate()
     
-    # Filter out pthread warning boilerplate, show everything else
+    # Filter out pthread warning boilerplate
     skip_patterns = [
         'pthread_setschedparam',
         'heartbeat thread',
@@ -300,11 +305,52 @@ def debug_squeak():
         if not any(p in line for p in skip_patterns):
             filtered.append(line)
     
-    print("\n📋 Full stack trace:")
-    print('\n'.join(filtered))
+    trace_text = '\n'.join(filtered)
     
-    if screenshot_path and os.path.exists(screenshot_path):
-        print(f"\n📸 Screenshot: {screenshot_path}")
+    # Generate timestamp and report filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = f"/tmp/ClaudeSmalltalkDebug_{timestamp}.html"
+    
+    # Generate HTML report
+    img_html = ""
+    if screenshot_b64:
+        img_html = f'<img src="data:image/png;base64,{screenshot_b64}" style="max-width:100%; border:1px solid #ccc;"/>'
+    
+    html = f'''<!DOCTYPE html>
+<html>
+<head>
+<title>ClaudeSmalltalk Debug Report - {timestamp}</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; margin: 20px; background: #f5f5f5; }}
+.container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+h1 {{ color: #333; border-bottom: 2px solid #007acc; padding-bottom: 10px; }}
+h2 {{ color: #555; margin-top: 30px; }}
+pre {{ background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 11px; line-height: 1.4; }}
+.timestamp {{ color: #888; font-size: 12px; }}
+img {{ margin: 10px 0; }}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>🔧 ClaudeSmalltalk Debug Report</h1>
+<p class="timestamp">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+
+<h2>📸 Screenshot</h2>
+{img_html if img_html else "<p>Screenshot not available</p>"}
+
+<h2>📋 SIGUSR1 Stack Trace</h2>
+<pre>{trace_text}</pre>
+</div>
+</body>
+</html>'''
+    
+    with open(report_path, 'w') as f:
+        f.write(html)
+    
+    print("\n📋 Full stack trace:")
+    print(trace_text)
+    
+    print(f"\n📄 Report saved: {report_path}")
     
     return True
 
