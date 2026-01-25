@@ -222,9 +222,10 @@ class MCPClient:
 
 
 def debug_squeak():
-    """Start Squeak, send SIGUSR1, capture stack trace."""
+    """Start Squeak, send SIGUSR1, capture stack trace and screenshot."""
     import signal
     import time
+    import platform
     
     vm_path, image_path = get_paths()
     if not vm_path or not image_path:
@@ -251,6 +252,20 @@ def debug_squeak():
     
     print(f"⏳ Waiting for Squeak to start (PID {squeak.pid})...")
     time.sleep(5)
+    
+    # Capture screenshot on Linux
+    screenshot_path = None
+    if platform.system() == "Linux" and shutil.which("import"):
+        screenshot_path = "/tmp/squeak_debug.png"
+        subprocess.run(
+            ["import", "-window", "root", "-display", ":98", screenshot_path],
+            capture_output=True, timeout=10
+        )
+        if os.path.exists(screenshot_path):
+            print(f"📸 Screenshot saved: {screenshot_path}")
+        else:
+            print("⚠️  Screenshot capture failed")
+            screenshot_path = None
     
     print(f"📡 Sending SIGUSR1 to get stack trace...")
     squeak.send_signal(signal.SIGUSR1)
@@ -287,6 +302,9 @@ def debug_squeak():
     
     print("\n📋 Full stack trace:")
     print('\n'.join(filtered))
+    
+    if screenshot_path and os.path.exists(screenshot_path):
+        print(f"\n📸 Screenshot: {screenshot_path}")
     
     return True
 
