@@ -21,6 +21,7 @@ Author: Adapted from ClaudeSmalltalk by John M McIntosh
 import glob
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -141,19 +142,29 @@ class MCPClient:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            start_new_session=True,  # Create process group for clean shutdown
         )
 
         # Initialize MCP connection
         self._initialize()
 
     def stop(self) -> None:
-        """Stop the subprocess."""
+        """Stop the subprocess and all children (Xvfb, Squeak VM)."""
         if self.process is not None:
-            self.process.terminate()
             try:
+                # Kill the entire process group, not just the wrapper
+                pgid = os.getpgid(self.process.pid)
+                os.killpg(pgid, signal.SIGTERM)
                 self.process.wait(timeout=5)
+            except (ProcessLookupError, OSError):
+                # Already dead
+                pass
             except subprocess.TimeoutExpired:
-                self.process.kill()
+                # Force kill if SIGTERM didn't work
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
             self.process = None
 
     def _next_id(self) -> int:
