@@ -64,6 +64,20 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 - Requires Python 3.10+ and OpenAI API key
 - See [OPENAI-SETUP.md](OPENAI-SETUP.md) for detailed instructions
 
+### Option E: Clawdbot Integration
+
+```
+┌─────────────┐    Telegram     ┌─────────────────┐    exec/stdio   ┌─────────────────┐
+│    User     │ ◄──────────────► │    Clawdbot     │ ◄──────────────► │ Squeak 6.0      │
+│  (Mobile/   │    (messages)   │   (AI Agent)    │   (subprocess)  │   MCPServer     │
+│  Desktop)   │                 │                 │                 │                 │
+└─────────────┘                 └─────────────────┘                 └─────────────────┘
+```
+
+- Enables **Clawdbot** (Telegram/Discord AI agent) to interact with Smalltalk
+- Includes debug tools: `--check` (verify setup) and `--debug` (SIGUSR1 stack trace + screenshot)
+- See [CLAWDBOT-SETUP.md](CLAWDBOT-SETUP.md) for detailed instructions
+
 ## Prerequisites
 
 **For Option B (Cuis Native MCP):**
@@ -84,6 +98,12 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 - **Python 3.10+** (OpenAI SDK requirement)
 - **OpenAI API Key** from https://platform.openai.com/api-keys
 - **Squeak 6.0** with MCP server (same as Option C)
+
+**For Option E (Clawdbot):**
+- **Clawdbot** installed and configured (https://github.com/clawdbot/clawdbot)
+- **Squeak 6.0** with MCP server (same as Option C)
+- **Xvfb** and **ImageMagick** for headless operation on Linux
+- **Python 3.10+** for the skill wrapper
 
 ---
 
@@ -305,6 +325,43 @@ python openai_mcp.py
 python openai_mcp.py "Evaluate 3 factorial in Smalltalk"
 ```
 
+## Installation: Option E (Clawdbot)
+
+See [CLAWDBOT-SETUP.md](CLAWDBOT-SETUP.md) for detailed step-by-step instructions.
+
+### Quick Start
+
+1. **Set up Squeak MCP server** (same as Option C)
+2. **Install dependencies**:
+
+```bash
+sudo apt install xvfb imagemagick
+```
+
+3. **Copy skill files** to your Clawdbot workspace:
+
+```bash
+cp -r clawdbot/ ~/clawd/skills/smalltalk/
+```
+
+4. **Verify setup**:
+
+```bash
+python3 ~/clawd/skills/smalltalk/clawdbot/smalltalk.py --check
+```
+
+5. **Debug a hung image**:
+
+```bash
+python3 ~/clawd/skills/smalltalk/clawdbot/smalltalk.py --debug
+```
+
+This generates `/tmp/ClaudeSmalltalkDebug_YYYYMMDD_HHMMSS.html` with:
+- Screenshot of the Squeak display
+- Full SIGUSR1 stack trace of all processes
+
+---
+
 ## Available Tools
 
 | Tool | Description |
@@ -413,6 +470,10 @@ MQTTConnectionTest buildSuite run inspect.
 | `openai_mcp.py` | OpenAI bridge for ChatGPT (Option D) |
 | `openai_tools.py` | OpenAI tool definitions (Option D) |
 | `OPENAI-SETUP.md` | Step-by-step guide for OpenAI setup |
+| `clawdbot/` | Clawdbot skill files (Option E) |
+| `clawdbot/SKILL.md` | Clawdbot skill definition |
+| `clawdbot/smalltalk.py` | Clawdbot wrapper with --check and --debug |
+| `CLAWDBOT-SETUP.md` | Step-by-step guide for Clawdbot setup |
 | `requirements.txt` | Python dependencies (Options A & D) |
 | `MQTT-Cuis.pck.st` | MQTT client library for Cuis (Option A) |
 | `ClaudeCuis.pck.st` | Claude handler (Option A) |
