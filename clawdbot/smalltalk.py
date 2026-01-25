@@ -221,10 +221,79 @@ class MCPClient:
         return str(result)
 
 
+def debug_squeak():
+    """Start Squeak, send SIGUSR1, capture stack trace."""
+    import signal
+    import time
+    
+    vm_path, image_path = get_paths()
+    if not vm_path or not image_path:
+        print("Error: VM or image not found. Run --check first.")
+        return False
+    
+    print("🔍 Starting Squeak for debugging...")
+    
+    # Start Xvfb
+    xvfb = subprocess.Popen(
+        ["Xvfb", ":98", "-screen", "0", "1024x768x24"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(2)
+    
+    # Start Squeak
+    env = os.environ.copy()
+    env["DISPLAY"] = ":98"
+    squeak = subprocess.Popen(
+        [vm_path, image_path, "--mcp"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        env=env, text=True
+    )
+    
+    print(f"⏳ Waiting for Squeak to start (PID {squeak.pid})...")
+    time.sleep(5)
+    
+    print(f"📡 Sending SIGUSR1 to get stack trace...")
+    squeak.send_signal(signal.SIGUSR1)
+    time.sleep(2)
+    
+    # Kill and collect output
+    squeak.terminate()
+    try:
+        output, _ = squeak.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        squeak.kill()
+        output, _ = squeak.communicate()
+    
+    xvfb.terminate()
+    
+    # Filter output
+    lines = output.split('\n')
+    # Find stack trace portion
+    stack_lines = []
+    in_stack = False
+    for line in lines:
+        if '>>#' in line or '**Stack' in line or '(SIGUSR1)' in line:
+            in_stack = True
+        if in_stack:
+            stack_lines.append(line)
+        if '(SIGUSR1)' in line:
+            break
+    
+    if stack_lines:
+        print("\n📋 Stack trace:")
+        print('\n'.join(stack_lines[-40:]))  # Last 40 lines
+    else:
+        print("\n⚠️ No stack trace captured. Full output:")
+        print('\n'.join(lines[-30:]))
+    
+    return True
+
+
 def print_usage():
     print("Usage: smalltalk.py <command> [args...]")
     print("\nCommands:")
     print("  --check                      - Verify setup")
+    print("  --debug                      - Debug hung system (SIGUSR1 stack trace)")
     print("  evaluate <code>              - Evaluate Smalltalk code")
     print("  browse <className>           - Browse a class")
     print("  method-source <class> <sel>  - Get method source")
@@ -252,6 +321,11 @@ def main():
     # Handle --check separately
     if command in ("--check", "-c", "check"):
         success = check_setup()
+        sys.exit(0 if success else 1)
+
+    # Handle --debug
+    if command in ("--debug", "-d", "debug"):
+        success = debug_squeak()
         sys.exit(0 if success else 1)
 
     # Get paths
