@@ -146,6 +146,34 @@ import -window root -display :99 /tmp/squeak_debug.png
 
 Requires `imagemagick` (`sudo apt install imagemagick`).
 
+### Getting a stack trace with SIGUSR1
+
+Send SIGUSR1 to the Squeak process to dump the current stack to stderr:
+
+```bash
+# Find the Squeak process
+pgrep -f squeak
+
+# Send signal (replace PID with actual)
+kill -USR1 <PID>
+```
+
+If Squeak was started with output redirected to a log file:
+```bash
+/path/to/squeak image.image --mcp > /tmp/squeak.log 2>&1 &
+```
+
+The stack trace will appear in `/tmp/squeak.log`, showing what each process is doing:
+```
+ProcessorScheduler>>#relinquishProcessorForMicroseconds:
+EventSensor>>#primGetNextEvent:
+Semaphore>>#wait
+...
+(SIGUSR1)
+```
+
+This helps identify what's blocking when the MCP server is unresponsive.
+
 ### pthread_setschedparam warning
 This is harmless. To suppress, create:
 ```bash
