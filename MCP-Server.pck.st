@@ -28,7 +28,7 @@ Claude Code config (~/.claude.json):
     }
   }
 '!
-!provides: 'MCP-Server' 1 10!
+!provides: 'MCP-Server' 1 11!
 !requires: 'JSON' nil nil nil!
 !requires: 'OSProcess' nil nil nil!
 SystemOrganization addCategory: #'MCP-Server'!
