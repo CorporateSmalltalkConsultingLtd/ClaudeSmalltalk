@@ -1,14 +1,20 @@
-'From Cuis7.7 [latest update: #7777] on 20 January 2026 at 5:17:14 pm'!
+'From Cuis7.7 [latest update: #7777] on 21 January 2026 at 6:20:31 pm'!
 'Description MCP Server for Claude Code integration.
 
 Implements the Model Context Protocol (MCP) over stdio with JSON-RPC 2.0.
 Uses JSON Lines protocol (one JSON message per line, no Content-Length headers).
 Provides 12 tools for Smalltalk interaction (saveImage intentionally excluded).
 
+REQUIRES: OSProcess package for async stdio support (GUI responsive during MCP wait).
+Uses BufferedAsyncFileReadStream which provides semaphore-based waiting,
+allowing the VM scheduler to run other processes (including the UI event loop)
+while the MCP server waits for input from Claude Code.
+
 Usage:
-  1. Load this package into a Cuis image
-  2. Save the image
-  3. Run with --mcp flag:
+  1. Load JSON and OSProcess packages into a Cuis image
+  2. Load this package (MCP-Server)
+  3. Save the image
+  4. Run with --mcp flag:
      squeak myImage.image --mcp
 
 Claude Code config (~/.claude.json):
@@ -22,7 +28,9 @@ Claude Code config (~/.claude.json):
     }
   }
 '!
-!provides: 'MCP-Server' 1 4!
+!provides: 'MCP-Server' 1 11!
+!requires: 'JSON' nil nil nil!
+!requires: 'OSProcess' nil nil nil!
 SystemOrganization addCategory: #'MCP-Server'!
 
 
@@ -47,24 +55,22 @@ MCPTransport class
 	instanceVariableNames: ''!
 
 
-!MCPServer methodsFor: 'initialization' stamp: ''!
+!MCPServer methodsFor: 'initialization' stamp: 'jmm 1/26/2026 11:00'!
 initialize
 	transport := MCPTransport new.
 	running := false.! !
 
-!MCPServer methodsFor: 'running' stamp: ''!
+!MCPServer methodsFor: 'running' stamp: 'jmm 1/26/2026 11:00'!
 run
-	| temp1 temp2 |
+	| request response |
 	running := true.
 	[ running ] whileTrue: [
-		temp1 := nil.
-		temp2 := nil.
-		temp1 := transport readMessage.
-		temp1
+		request := transport readMessage.
+		request
 			ifNil: [ running := false ]
 			ifNotNil: [
-				temp2 := self handleRequest: temp1.
-				temp2 ifNotNil: [ transport writeMessage: (Json render: temp2) ]]].! !
+				response := self handleRequest: request.
+				response ifNotNil: [ transport writeMessage: (Json render: response) ]]].! !
 
 !MCPServer methodsFor: 'running' stamp: ''!
 stop
@@ -779,7 +785,7 @@ toolClassesInCategory: arg1
 		argm3_5 name ]) asArray sorted.
 	^ Json render: temp4.! !
 
-!MCPServer methodsFor: 'tool implementations' stamp: ''!
+!MCPServer methodsFor: 'tool implementations' stamp: 'jmm 1/26/2026 09:30'!
 toolDefineClass: arg1
 	| temp2 |
 	temp2 := arg1
@@ -807,7 +813,7 @@ toolDefineMethod: arg1
 		at: temp2 asSymbol
 		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
 	temp5
-		compile: temp3
+		compileSilently: temp3
 		classified: temp4.
 	^ 'Method defined successfully'.! !
 
@@ -924,25 +930,52 @@ toolSubclasses: arg1
 		argm3_5 name ]) asArray sorted.
 	^ Json render: temp4.! !
 
-!MCPServer class methodsFor: 'system startup' stamp: ''!
-startUp: arg1
-	| temp2 |
-	arg1 ifFalse: [ ^ self ].
-	SourceFiles
-		at: 2
-		put: nil.
-	temp2 := Smalltalk startUpArguments.
-	(temp2 includes: '--mcp') ifTrue: [ self startServer ].! !
+!MCPServer class methodsFor: 'system startup' stamp: 'jmm 1/26/2026 11:00'!
+startUp: resuming
+	| args |
+	resuming ifFalse: [ ^ self ].
+	args := Smalltalk startUpArguments.
+	(args includes: '--mcp') ifTrue: [ self startServer ].! !
 
-!MCPServer class methodsFor: 'instance creation' stamp: ''!
+!MCPServer class methodsFor: 'version' stamp: 'jmm 1/26/2026 11:00'!
+version
+	"Return the MCP server version number.
+	 Increment when making changes that external tools should detect.
+	 Version history:
+	   1 - Initial version
+	   2 - Fixed toolDefineMethod: to use compileSilently: for headless operation
+	   3 - (skipped)
+	   4 - Fork MCP to background process, allowing GUI to display
+	   5 - Set author initials to avoid prompt during class/method definition
+	   6 - Port to OSProcess for non-blocking stdio (GUI responsive during MCP wait)
+	   7 - Ensure ThisOSProcess is initialized before MCP transport accesses it
+	   8 - Remove debug logging that blocked UI startup
+	   9 - Simplify MCPTransport initialize
+	   10 - Add extensive logging to debug UI startup hang
+	   11 - Remove debug logging, use correct Cuis author API"
+	^ 11! !
+
+!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/26/2026 11:00'!
 startServer
-	(Delay forMilliseconds: 500) wait.
-	self new run.! !
+	"Start MCP server in background process, allowing GUI to initialize normally"
+	SourceFiles at: 2 put: nil.  "Disable changes file for MCP mode"
+	Utilities setAuthorName: 'ClaudeSmalltalk' initials: 'LLM'.
+	[
+		(Delay forMilliseconds: 500) wait.
+		self new run
+	] forkAt: Processor userBackgroundPriority named: 'MCP Server'.! !
 
-!MCPTransport methodsFor: 'initialization' stamp: ''!
+!MCPTransport methodsFor: 'initialization' stamp: 'jmm 1/26/2026 11:00'!
 initialize
-	stdin := StdIOReadStream stdin.
-	stdout := StdIOWriteStream stdout.! !
+	"Initialize using OSProcess for stdio with buffered async reads.
+	BufferedAsyncFileReadStream uses semaphore-based waiting which
+	allows the VM to schedule other processes (like the UI) while waiting for input."
+
+	| osProc |
+	osProc := OSProcess thisOSProcess.
+	stdin := osProc stdIn asBufferedAsyncFileReadStream.
+	stdin setBlocking.
+	stdout := osProc stdOut.! !
 
 !MCPTransport methodsFor: 'reading' stamp: ''!
 readLine
@@ -994,13 +1027,8 @@ checkIfAlreadyRunningOrStoppedNoExit
 
 !SystemDictionary methodsFor: '*MCP-Server' stamp: ''!
 openSourcesAndChanges
-	| temp1 temp2 temp3 temp4 temp5 temp6 temp7 temp8 temp9 temp11 |
-	temp6 := false.
-	temp8 := 2.
-	[
-	temp8 <= 100 and: [ (temp7 := self getSystemAttribute: temp8) notNil ]] whileTrue: [
-		(temp7 = '--mcp' or: [ temp7 = '-d' ]) ifTrue: [ temp6 := true ].
-		temp8 := temp8 + 1 ].
+	"Always run without changes file - allows image to be distributed without .changes"
+	| temp1 temp9 temp3 |
 	temp1 := SourceFiles at: 1.
 	temp1 ifNil: [
 		temp9 := self defaultSourcesName asFullFileEntry.
@@ -1012,36 +1040,9 @@ openSourcesAndChanges
 	(temp1 isNil and: [ Preferences at: #warnIfNoSourcesFile ]) ifTrue: [
 		temp3 := 'Cuis cannot locate the sources file named ' , temp9 pathName , '.' , String newLineString , 'Please check that the file is properly named and is in the same directory as this image.'.
 		self logStartupError: temp3 ].
-	temp6 ifTrue: [
-		SourceFiles := Array
-			with: temp1
-			with: nil.
-		^ self ].
-	temp2 := SourceFiles at: 2.
-	temp2 ifNil: [
-		temp9 := self defaultChangesName asFullFileEntry.
-		temp5 := temp9 pathName.
-		temp9 exists
-			ifTrue: [
-				temp4 := self lastQuitLogPosition.
-				temp4 > 0 ifTrue: [
-					temp9 readStreamDo: [ :argm11_12 |
-						argm11_12 position: temp4.
-						temp11 := argm11_12 nextChunk ].
-					((temp11 beginsWith: self tagHeader) and: [ temp11 includesSubString: 'priorSource: ' ]) ifFalse: [
-						(Preferences at: #warnIfNoChangesFile) ifTrue: [ self logStartupError: 'Incorrect changes file: ' , temp5 , String newLineString , 'Missing code will be decompiled' , String newLineString , 'New source code will not be saved' ].
-						temp9 := nil ]]]
-			ifFalse: [
-				(Preferences at: #warnIfNoChangesFile) ifTrue: [ self logStartupError: 'Could not find changes file: ' , temp5 , String newLineString , 'Missing code will be decompiled' , String newLineString , 'New source code will not be saved' ].
-				temp9 := nil ].
-		temp9 ifNotNil: [
-			temp2 := [ temp9 appendStream ]
-				on: FileWriteError
-				do: [ self logStartupError: 'Could not write to changes file: ' , temp5 , String newLineString , 'Changes file will not be used.' , String newLineString , 'Missing code will be decompiled' , String newLineString , 'New source code will not be saved' ]]].
-	ChangesInitialFileSize := temp2 ifNotNil: [ temp2 position ].
 	SourceFiles := Array
 		with: temp1
-		with: temp2.! !
+		with: nil.! !
 
 "Register MCPServer for startup"!
 Smalltalk addToStartUpList: MCPServer!

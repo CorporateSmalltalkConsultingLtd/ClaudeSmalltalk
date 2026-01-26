@@ -14,12 +14,14 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 ```
 ┌─────────────┐     MCP/stdio     ┌─────────────────┐
 │   Claude    │ ◄────────────────► │ Cuis Smalltalk  │
-│  (Desktop   │    (JSON Lines)    │   (headless)    │
+│  (Desktop   │    (JSON Lines)    │   (with GUI)    │
 │  or Code)   │                    │   MCPServer     │
 └─────────────┘                    └─────────────────┘
 ```
 
 - **Simplest setup** - No Python, no MQTT broker required
+- **Responsive GUI** - Cuis GUI remains responsive during MCP operations
+- Uses OSProcess with `BufferedAsyncFileReadStream` for non-blocking stdio
 - Claude spawns the Cuis image directly
 - 12 tools available (saveImage intentionally excluded for safety)
 
@@ -82,6 +84,7 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
 **For Option B (Cuis Native MCP):**
 - **Cuis Smalltalk VM** (Squeak VM or Cog VM)
+- **OSProcess package** (available via `Feature require: 'OSProcess'`)
 - **ClaudeCuis.image** (provided, or build your own)
 
 **For Option C (Squeak Native MCP):**
@@ -148,6 +151,7 @@ If you want to build your own image instead of using the provided `ClaudeCuis.im
 
 ```smalltalk
 Feature require: 'JSON'.
+Feature require: 'OSProcess'.
 CodePackageFile installPackage: '/path/to/MCP-Server.pck.st' asFileEntry.
 Smalltalk saveImage.
 ```
