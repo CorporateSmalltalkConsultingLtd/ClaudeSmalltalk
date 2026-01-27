@@ -193,7 +193,6 @@ class SmalltalkDaemon:
                 os.killpg(pgid, signal.SIGTERM)
                 self.process.wait(timeout=5)
             except (ProcessLookupError, OSError):
-            except (ProcessLookupError, OSError):
                 # Process/group is already gone or cannot be signaled; safe to ignore on shutdown.
                 pass
             except subprocess.TimeoutExpired:
