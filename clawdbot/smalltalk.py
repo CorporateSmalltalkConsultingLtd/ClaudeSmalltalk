@@ -133,9 +133,9 @@ def call_daemon(tool_name: str, arguments: dict) -> str:
         return str(result)
     
     finally:
-        sock.close()
+        pass
 
-
+    sock.close()
 def check_setup() -> bool:
     """Verify all dependencies and paths are correct."""
     print("🔍 Checking Clawdbot Smalltalk setup...\n")
