@@ -344,11 +344,22 @@ class SmalltalkDaemon:
             print("❌ Failed to start VM, exiting")
             sys.exit(1)
 
-        # Create socket
-        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind(SOCKET_PATH)
-        self.socket.listen(5)
+        # Create socket with restrictive permissions (user-only)
+        old_umask = os.umask(0o177)
+        try:
+            self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind(SOCKET_PATH)
+            self.socket.listen(5)
+        finally:
+            os.umask(old_umask)
+
+        # Ensure the socket file is only accessible by the owner
+        try:
+            os.chmod(SOCKET_PATH, 0o600)
+        except OSError:
+            # If chmod fails, continue running but leave a diagnostic message
+            print(f"⚠️  Could not set permissions on socket {SOCKET_PATH}")
         self.socket.settimeout(1.0)  # Allow periodic checks
 
         # Write PID file
