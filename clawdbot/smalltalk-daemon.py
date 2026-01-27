@@ -186,12 +186,14 @@ class SmalltalkDaemon:
                 os.killpg(pgid, signal.SIGTERM)
                 self.process.wait(timeout=5)
             except (ProcessLookupError, OSError):
-                # VM process or process group may already have exited; safe to ignore.
+            except (ProcessLookupError, OSError):
+                # Process/group is already gone or cannot be signaled; safe to ignore on shutdown.
                 pass
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(pgid, signal.SIGKILL)
                 except (ProcessLookupError, OSError):
+                    # If the process/group no longer exists at this point, nothing more to do.
                     # If the process is already gone when sending SIGKILL, ignore the error.
                     pass
             self.process = None
