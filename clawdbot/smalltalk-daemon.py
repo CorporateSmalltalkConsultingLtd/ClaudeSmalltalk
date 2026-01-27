@@ -434,12 +434,6 @@ def cmd_start():
                 os.close(lock_fd)
             except (OSError, IOError):
                 pass
-        # Clean up lock file
-        try:
-            if os.path.exists(LOCK_FILE):
-                os.unlink(LOCK_FILE)
-        except (OSError, IOError):
-            pass
 
 
 def cmd_stop():
