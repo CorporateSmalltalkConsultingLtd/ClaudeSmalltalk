@@ -315,13 +315,15 @@ class SmalltalkDaemon:
         except socket.timeout:
             try:
                 conn.sendall((json.dumps({"error": "Request timed out"}) + "\n").encode("utf-8"))
-            except:
+            except Exception:
+                # Best-effort attempt to send timeout error to client; ignore failures while sending.
                 pass
         except Exception as e:
             print(f"❌ Client error: {e}")
             try:
                 conn.sendall((json.dumps({"error": str(e)}) + "\n").encode("utf-8"))
-            except:
+            except Exception:
+                # Best-effort attempt to send error details to client; ignore failures while sending.
                 pass
         finally:
             conn.close()
