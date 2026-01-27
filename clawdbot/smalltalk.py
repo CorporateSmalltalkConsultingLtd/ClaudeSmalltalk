@@ -79,13 +79,12 @@ def daemon_available() -> bool:
     if not os.path.exists(DAEMON_SOCKET):
         return False
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(2.0)
-        sock.connect(DAEMON_SOCKET)
-        sock.sendall(b'{"tool": "__ping__"}\n')
-        response = sock.recv(4096)
-        sock.close()
-        return b'"status": "ok"' in response
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2.0)
+            sock.connect(DAEMON_SOCKET)
+            sock.sendall(b'{"tool": "__ping__"}\n')
+            response = sock.recv(4096)
+            return b'"status": "ok"' in response
     except Exception:
         return False
 
