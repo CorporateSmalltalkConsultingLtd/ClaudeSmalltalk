@@ -447,15 +447,14 @@ def cmd_status():
         print(f"✅ Daemon running (PID {pid})")
         # Try to ping it
         try:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(SOCKET_PATH)
-            sock.sendall(b'{"tool": "__ping__"}\n')
-            response = sock.recv(4096).decode()
-            sock.close()
-            data = json.loads(response)
-            vm_pid = data.get("pid")
-            if vm_pid:
-                print(f"   VM PID: {vm_pid}")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.connect(SOCKET_PATH)
+                sock.sendall(b'{"tool": "__ping__"}\n')
+                response = sock.recv(4096).decode()
+                data = json.loads(response)
+                vm_pid = data.get("pid")
+                if vm_pid:
+                    print(f"   VM PID: {vm_pid}")
         except Exception as e:
             print(f"   ⚠️  Could not ping daemon: {e}")
     else:
