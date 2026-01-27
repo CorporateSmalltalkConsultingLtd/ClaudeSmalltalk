@@ -589,16 +589,12 @@ def main():
         if len(sys.argv) < 4:
             print("Usage: smalltalk.py define-method <className> <source>")
             sys.exit(1)
-        # Workaround: use compileSilently instead of broken MCP tool
         class_name = sys.argv[2]
         source = " ".join(sys.argv[3:])
-        # Escape quotes in source for Smalltalk string
-        escaped_source = source.replace("'", "''")
-        code = f"{class_name} compileSilently: '{escaped_source}' classified: 'as yet unclassified'"
-        result = run_tool("smalltalk_evaluate", {"code": code})
-        # Convert selector result to success message
-        if result.startswith("#"):
-            result = f"Method {result} defined successfully"
+        result = run_tool("smalltalk_define_method", {
+            "className": class_name,
+            "source": source,
+        })
 
     elif command == "delete-method":
         if len(sys.argv) < 4:
