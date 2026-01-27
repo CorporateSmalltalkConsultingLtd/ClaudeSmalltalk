@@ -171,11 +171,17 @@ class SmalltalkDaemon:
             "^ ''Method defined successfully''.' classified: 'tool implementations'"
         )
         
-        self._send_to_vm("tools/call", {
+        response = self._send_to_vm("tools/call", {
             "name": "smalltalk_evaluate", 
             "arguments": {"code": fix_code}
         })
 
+        # Treat any reported error or unexpected response type as a hotfix failure
+        if not isinstance(response, dict) or "error" in response:
+            error_detail = None
+            if isinstance(response, dict):
+                error_detail = response.get("error")
+            raise RuntimeError(f"Hotfix 'toolDefineMethod' failed: {error_detail}")
     def stop_vm(self) -> None:
         """Stop the Squeak VM subprocess."""
         if self.process is not None:
