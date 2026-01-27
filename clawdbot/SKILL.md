@@ -72,11 +72,33 @@ python3 smalltalk.py delete-method Counter increment
 python3 smalltalk.py delete-class Counter
 ```
 
+## Operating Modes
+
+### Exec Mode (Default)
+Each command spawns a fresh VM. State does not persist between calls.
+Best for read-only queries (browse, evaluate, hierarchy).
+
+### Daemon Mode (Persistent)
+A single VM stays running. State persists across calls.
+Best for development sessions with define-class/define-method.
+
+```bash
+# Start daemon (use nohup to prevent SIGKILL)
+nohup python3 smalltalk-daemon.py start > /tmp/daemon.log 2>&1 &
+
+# Check status
+python3 smalltalk.py --daemon-status
+
+# Stop daemon
+python3 smalltalk-daemon.py stop
+```
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `--check` | Verify VM/image paths and dependencies |
+| `--daemon-status` | Check if daemon is running |
 | `--debug` | Debug hung system (sends SIGUSR1, captures stack trace) |
 | `evaluate <code>` | Execute Smalltalk code, return result |
 | `browse <class>` | Get class metadata (superclass, ivars, methods) |
@@ -103,3 +125,5 @@ python3 smalltalk.py delete-class Counter
 - Requires xvfb for headless operation on Linux servers
 - Uses Squeak 6.0 MCP server (GUI stays responsive if display available)
 - `saveImage` intentionally excluded for safety
+- MCPServer version 2+ required for headless `define-method` (check with `--check`)
+- Daemon mode recommended for define-class/define-method workflows
