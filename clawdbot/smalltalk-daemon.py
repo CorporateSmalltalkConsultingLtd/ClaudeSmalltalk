@@ -427,10 +427,9 @@ def cmd_start():
         # Lock will be released when daemon exits (file descriptor closed)
         daemon.run()
     finally:
-        # Release lock if still held
+        # Release lock if still held (closing the file descriptor releases the lock)
         if lock_fd is not None:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
                 os.close(lock_fd)
             except (OSError, IOError):
                 pass
