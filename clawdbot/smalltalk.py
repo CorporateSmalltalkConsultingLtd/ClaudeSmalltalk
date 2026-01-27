@@ -555,95 +555,99 @@ def main():
         sys.exit(0 if success else 1)
 
     # Map commands to tool calls
-    if command == "evaluate":
-        if len(sys.argv) < 3:
-            print("Usage: smalltalk.py evaluate <code>")
+    try:
+        if command == "evaluate":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py evaluate <code>")
+                sys.exit(1)
+            code = " ".join(sys.argv[2:])
+            result = run_tool("smalltalk_evaluate", {"code": code})
+
+        elif command == "browse":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py browse <className>")
+                sys.exit(1)
+            result = run_tool("smalltalk_browse", {"className": sys.argv[2]})
+
+        elif command == "method-source":
+            if len(sys.argv) < 4:
+                print("Usage: smalltalk.py method-source <className> <selector>")
+                sys.exit(1)
+            result = run_tool("smalltalk_method_source", {
+                "className": sys.argv[2],
+                "selector": sys.argv[3]
+            })
+
+        elif command == "define-class":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py define-class <definition>")
+                sys.exit(1)
+            result = run_tool("smalltalk_define_class", {
+                "definition": " ".join(sys.argv[2:])
+            })
+
+        elif command == "define-method":
+            if len(sys.argv) < 4:
+                print("Usage: smalltalk.py define-method <className> <source>")
+                sys.exit(1)
+            class_name = sys.argv[2]
+            source = " ".join(sys.argv[3:])
+            result = run_tool("smalltalk_define_method", {
+                "className": class_name,
+                "source": source,
+            })
+
+        elif command == "delete-method":
+            if len(sys.argv) < 4:
+                print("Usage: smalltalk.py delete-method <className> <selector>")
+                sys.exit(1)
+            result = run_tool("smalltalk_delete_method", {
+                "className": sys.argv[2],
+                "selector": sys.argv[3]
+            })
+
+        elif command == "delete-class":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py delete-class <className>")
+                sys.exit(1)
+            result = run_tool("smalltalk_delete_class", {"className": sys.argv[2]})
+
+        elif command == "list-classes":
+            prefix = sys.argv[2] if len(sys.argv) > 2 else ""
+            result = run_tool("smalltalk_list_classes", {"prefix": prefix})
+
+        elif command == "hierarchy":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py hierarchy <className>")
+                sys.exit(1)
+            result = run_tool("smalltalk_hierarchy", {"className": sys.argv[2]})
+
+        elif command == "subclasses":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py subclasses <className>")
+                sys.exit(1)
+            result = run_tool("smalltalk_subclasses", {"className": sys.argv[2]})
+
+        elif command == "list-categories":
+            result = run_tool("smalltalk_list_categories", {})
+
+        elif command == "classes-in-category":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py classes-in-category <category>")
+                sys.exit(1)
+            result = run_tool("smalltalk_classes_in_category", {
+                "category": sys.argv[2]
+            })
+
+        else:
+            print(f"Unknown command: {command}")
+            print_usage()
             sys.exit(1)
-        code = " ".join(sys.argv[2:])
-        result = run_tool("smalltalk_evaluate", {"code": code})
 
-    elif command == "browse":
-        if len(sys.argv) < 3:
-            print("Usage: smalltalk.py browse <className>")
-            sys.exit(1)
-        result = run_tool("smalltalk_browse", {"className": sys.argv[2]})
-
-    elif command == "method-source":
-        if len(sys.argv) < 4:
-            print("Usage: smalltalk.py method-source <className> <selector>")
-            sys.exit(1)
-        result = run_tool("smalltalk_method_source", {
-            "className": sys.argv[2],
-            "selector": sys.argv[3]
-        })
-
-    elif command == "define-class":
-        if len(sys.argv) < 3:
-            print("Usage: smalltalk.py define-class <definition>")
-            sys.exit(1)
-        result = run_tool("smalltalk_define_class", {
-            "definition": " ".join(sys.argv[2:])
-        })
-
-    elif command == "define-method":
-        if len(sys.argv) < 4:
-            print("Usage: smalltalk.py define-method <className> <source>")
-            sys.exit(1)
-        class_name = sys.argv[2]
-        source = " ".join(sys.argv[3:])
-        result = run_tool("smalltalk_define_method", {
-            "className": class_name,
-            "source": source,
-        })
-
-    elif command == "delete-method":
-        if len(sys.argv) < 4:
-            print("Usage: smalltalk.py delete-method <className> <selector>")
-            sys.exit(1)
-        result = run_tool("smalltalk_delete_method", {
-            "className": sys.argv[2],
-            "selector": sys.argv[3]
-        })
-
-    elif command == "delete-class":
-        if len(sys.argv) < 3:
-            print("Usage: smalltalk.py delete-class <className>")
-            sys.exit(1)
-        result = run_tool("smalltalk_delete_class", {"className": sys.argv[2]})
-
-    elif command == "list-classes":
-        prefix = sys.argv[2] if len(sys.argv) > 2 else ""
-        result = run_tool("smalltalk_list_classes", {"prefix": prefix})
-
-    elif command == "hierarchy":
-        if len(sys.argv) < 3:
-            print("Usage: smalltalk.py hierarchy <className>")
-            sys.exit(1)
-        result = run_tool("smalltalk_hierarchy", {"className": sys.argv[2]})
-
-    elif command == "subclasses":
-        if len(sys.argv) < 3:
-            print("Usage: smalltalk.py subclasses <className>")
-            sys.exit(1)
-        result = run_tool("smalltalk_subclasses", {"className": sys.argv[2]})
-
-    elif command == "list-categories":
-        result = run_tool("smalltalk_list_categories", {})
-
-    elif command == "classes-in-category":
-        if len(sys.argv) < 3:
-            print("Usage: smalltalk.py classes-in-category <category>")
-            sys.exit(1)
-        result = run_tool("smalltalk_classes_in_category", {
-            "category": sys.argv[2]
-        })
-
-    else:
-        print(f"Unknown command: {command}")
-        print_usage()
+        print(result)
+    except Exception as e:
+        print(f"❌ Error executing command: {e}", file=sys.stderr)
         sys.exit(1)
-
-    print(result)
 
 
 if __name__ == "__main__":
