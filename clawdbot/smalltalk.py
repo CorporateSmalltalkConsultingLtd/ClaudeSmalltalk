@@ -211,8 +211,8 @@ def check_setup() -> bool:
                                 print(f"⚠️  MCPServer version: {version} (recommend >= 2 for headless define-method)")
                                 print("   Update image with: FileStream fileIn: 'MCP-Server-Squeak.st'")
                             break
-                    except (json.JSONDecodeError, ValueError, KeyError):
-                        pass
+                    except (json.JSONDecodeError, ValueError, KeyError) as e:
+                        print(f"⚠️  Failed to parse MCPServer version from line: {line!r} ({e})")
         except subprocess.TimeoutExpired:
             print("⚠️  MCPServer version check timed out")
         except Exception as e:
