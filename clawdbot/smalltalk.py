@@ -650,7 +650,10 @@ def main():
             sys.exit(1)
         print(result)
     except Exception as e:
-        print(f"❌ Error executing command: {e}", file=sys.stderr)
+        error_msg = f"❌ Error executing command '{command}': {type(e).__name__}"
+        if str(e):
+            error_msg += f": {e}"
+        print(error_msg, file=sys.stderr)
         sys.exit(1)
 
 
