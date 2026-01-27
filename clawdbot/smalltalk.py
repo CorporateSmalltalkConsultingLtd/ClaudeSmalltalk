@@ -2,11 +2,13 @@
 """
 Smalltalk CLI for Clawdbot
 
-Communicates with a Squeak/Cuis MCP server via stdio JSON-RPC.
-Requires xvfb-run for headless operation on Linux servers.
+Communicates with a Squeak/Cuis MCP server. Supports two modes:
+1. Daemon mode: Connect to running smalltalk-daemon (fast, persistent state)
+2. Exec mode: Start fresh VM per call (fallback if no daemon)
 
 Usage:
     smalltalk.py --check                    # Verify setup
+    smalltalk.py --daemon-status            # Check daemon status
     smalltalk.py evaluate "3 factorial"
     smalltalk.py browse OrderedCollection
     smalltalk.py method-source String asUppercase
@@ -23,10 +25,13 @@ import json
 import os
 import signal
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
+
+DAEMON_SOCKET = "/tmp/smalltalk-daemon.sock"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
@@ -69,10 +74,80 @@ def get_paths() -> Tuple[str, str]:
     return vm_path or "", image_path or ""
 
 
+def daemon_available() -> bool:
+    """Check if daemon is running and responsive."""
+    if not os.path.exists(DAEMON_SOCKET):
+        return False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2.0)
+            sock.connect(DAEMON_SOCKET)
+            sock.sendall(b'{"tool": "__ping__"}\n')
+            response = sock.recv(4096)
+            return b'"status": "ok"' in response
+    except Exception:
+        return False
+
+
+def call_daemon(tool_name: str, arguments: dict) -> str:
+    """Call a tool via the daemon socket."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(60.0)  # 60 second timeout for slow tool calls
+    
+    try:
+        sock.connect(DAEMON_SOCKET)
+
+        request = {"tool": tool_name, "arguments": arguments}
+        sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
+
+        # Read response - may come in chunks
+        data = b""
+        while True:
+            try:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if b"\n" in data:
+                    break
+            except socket.timeout:
+                break
+
+        if not data:
+            raise RuntimeError("Empty response from daemon")
+
+        response = json.loads(data.decode("utf-8").strip())
+
+        if "error" in response:
+            error = response["error"]
+            if isinstance(error, dict):
+                return f"Error: {error.get('message', 'Unknown error')}"
+            return f"Error: {error}"
+
+        result = response.get("result", response)
+        content = result.get("content", [])
+
+        if content and isinstance(content, list):
+            return content[0].get("text", str(result))
+        return str(result)
+    
+    finally:
+        pass
+
+    sock.close()
 def check_setup() -> bool:
     """Verify all dependencies and paths are correct."""
     print("🔍 Checking Clawdbot Smalltalk setup...\n")
     all_ok = True
+
+    # Check daemon status
+    if daemon_available():
+        print("✅ Daemon running (fast mode available)")
+    else:
+        print("ℹ️  Daemon not running (will use exec mode)")
+        print("   Start with: smalltalk-daemon.py start")
+
+    print()
 
     # Check xvfb-run
     if shutil.which("xvfb-run"):
@@ -109,6 +184,40 @@ def check_setup() -> bool:
             print(f"⚠️  No .sources file in image directory")
             print(f"   May cause dialog popups - symlink SqueakV60.sources to {image_dir}/")
 
+    # Check MCPServer version (quick exec test)
+    if all_ok and vm_path and image_path:
+        print()
+        print("🔍 Checking MCPServer version...")
+        try:
+            result = subprocess.run(
+                ["xvfb-run", "-a", vm_path, image_path, "--mcp"],
+                input='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smalltalk_evaluate","arguments":{"code":"MCPServer version"}}}\n',
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            # Parse response to get version
+            for line in result.stdout.strip().split('\n'):
+                if '"result"' in line:
+                    try:
+                        resp = json.loads(line)
+                        content = resp.get("result", {}).get("content", [])
+                        if content:
+                            version_str = content[0].get("text", "0")
+                            version = int(version_str)
+                            if version >= 2:
+                                print(f"✅ MCPServer version: {version}")
+                            else:
+                                print(f"⚠️  MCPServer version: {version} (recommend >= 2 for headless define-method)")
+                                print("   Update image with: FileStream fileIn: 'MCP-Server-Squeak.st'")
+                            break
+                    except (json.JSONDecodeError, ValueError, KeyError) as e:
+                        print(f"⚠️  Failed to parse MCPServer version from line: {line!r} ({e})")
+        except subprocess.TimeoutExpired:
+            print("⚠️  MCPServer version check timed out")
+        except Exception as e:
+            print(f"⚠️  Could not check MCPServer version: {e}")
+
     print()
     if all_ok:
         print("✅ Setup looks good!")
@@ -119,7 +228,7 @@ def check_setup() -> bool:
 
 
 class MCPClient:
-    """Simple MCP client for Smalltalk interaction."""
+    """Simple MCP client for Smalltalk interaction (exec mode)."""
 
     def __init__(self, vm_path: str, image_path: str):
         self.vm_path = vm_path
@@ -370,6 +479,7 @@ def print_usage():
     print("Usage: smalltalk.py <command> [args...]")
     print("\nCommands:")
     print("  --check                      - Verify setup")
+    print("  --daemon-status              - Check daemon status")
     print("  --debug                      - Debug hung system (SIGUSR1 stack trace)")
     print("  evaluate <code>              - Evaluate Smalltalk code")
     print("  browse <className>           - Browse a class")
@@ -383,9 +493,38 @@ def print_usage():
     print("  subclasses <className>       - Get subclasses")
     print("  list-categories              - List categories")
     print("  classes-in-category <cat>    - List classes in category")
+    print("\nModes:")
+    print("  If smalltalk-daemon is running, uses fast persistent mode.")
+    print("  Otherwise falls back to exec mode (fresh VM per call).")
     print("\nEnvironment:")
     print("  SQUEAK_VM_PATH     - Path to VM (auto-detected if not set)")
     print("  SQUEAK_IMAGE_PATH  - Path to image (auto-detected if not set)")
+
+
+def run_tool(tool_name: str, arguments: dict) -> str:
+    """Run a tool - uses daemon if available, otherwise exec mode."""
+    # Try daemon first
+    if daemon_available():
+        try:
+            return call_daemon(tool_name, arguments)
+        except Exception as e:
+            print(f"⚠️  Daemon error, falling back to exec mode: {e}", file=sys.stderr)
+
+    # Fallback to exec mode
+    vm_path, image_path = get_paths()
+
+    if not vm_path or not os.path.exists(vm_path):
+        return "Error: VM not found. Run 'smalltalk.py --check' for setup help"
+
+    if not image_path or not os.path.exists(image_path):
+        return "Error: Image not found. Run 'smalltalk.py --check' for setup help"
+
+    client = MCPClient(vm_path, image_path)
+    try:
+        client.start()
+        return client.call_tool(tool_name, arguments)
+    finally:
+        client.stop()
 
 
 def main():
@@ -400,120 +539,110 @@ def main():
         success = check_setup()
         sys.exit(0 if success else 1)
 
+    # Handle --daemon-status
+    if command in ("--daemon-status", "--status"):
+        if daemon_available():
+            print("✅ Daemon running (fast mode)")
+        else:
+            print("❌ Daemon not running (exec mode)")
+            print("   Start with: smalltalk-daemon.py start")
+        sys.exit(0)
+
     # Handle --debug
     if command in ("--debug", "-d", "debug"):
         success = debug_squeak()
         sys.exit(0 if success else 1)
 
-    # Get paths
-    vm_path, image_path = get_paths()
-
-    if not vm_path or not os.path.exists(vm_path):
-        print(f"Error: VM not found")
-        print(f"Run 'smalltalk.py --check' for setup help")
-        sys.exit(1)
-
-    if not image_path or not os.path.exists(image_path):
-        print(f"Error: Image not found")
-        print(f"Run 'smalltalk.py --check' for setup help")
-        sys.exit(1)
-
-    client = MCPClient(vm_path, image_path)
-
-    try:
-        client.start()
-
-        # Map commands to tool calls
-        if command == "evaluate":
-            if len(sys.argv) < 3:
-                print("Usage: smalltalk.py evaluate <code>")
-                sys.exit(1)
-            code = " ".join(sys.argv[2:])
-            result = client.call_tool("smalltalk_evaluate", {"code": code})
-
-        elif command == "browse":
-            if len(sys.argv) < 3:
-                print("Usage: smalltalk.py browse <className>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_browse", {"className": sys.argv[2]})
-
-        elif command == "method-source":
-            if len(sys.argv) < 4:
-                print("Usage: smalltalk.py method-source <className> <selector>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_method_source", {
-                "className": sys.argv[2],
-                "selector": sys.argv[3]
-            })
-
-        elif command == "define-class":
-            if len(sys.argv) < 3:
-                print("Usage: smalltalk.py define-class <definition>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_define_class", {
-                "definition": " ".join(sys.argv[2:])
-            })
-
-        elif command == "define-method":
-            if len(sys.argv) < 4:
-                print("Usage: smalltalk.py define-method <className> <source>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_define_method", {
-                "className": sys.argv[2],
-                "source": " ".join(sys.argv[3:])
-            })
-
-        elif command == "delete-method":
-            if len(sys.argv) < 4:
-                print("Usage: smalltalk.py delete-method <className> <selector>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_delete_method", {
-                "className": sys.argv[2],
-                "selector": sys.argv[3]
-            })
-
-        elif command == "delete-class":
-            if len(sys.argv) < 3:
-                print("Usage: smalltalk.py delete-class <className>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_delete_class", {"className": sys.argv[2]})
-
-        elif command == "list-classes":
-            prefix = sys.argv[2] if len(sys.argv) > 2 else ""
-            result = client.call_tool("smalltalk_list_classes", {"prefix": prefix})
-
-        elif command == "hierarchy":
-            if len(sys.argv) < 3:
-                print("Usage: smalltalk.py hierarchy <className>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_hierarchy", {"className": sys.argv[2]})
-
-        elif command == "subclasses":
-            if len(sys.argv) < 3:
-                print("Usage: smalltalk.py subclasses <className>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_subclasses", {"className": sys.argv[2]})
-
-        elif command == "list-categories":
-            result = client.call_tool("smalltalk_list_categories", {})
-
-        elif command == "classes-in-category":
-            if len(sys.argv) < 3:
-                print("Usage: smalltalk.py classes-in-category <category>")
-                sys.exit(1)
-            result = client.call_tool("smalltalk_classes_in_category", {
-                "category": sys.argv[2]
-            })
-
-        else:
-            print(f"Unknown command: {command}")
-            print_usage()
+    # Map commands to tool calls
+    if command == "evaluate":
+        if len(sys.argv) < 3:
+            print("Usage: smalltalk.py evaluate <code>")
             sys.exit(1)
+        code = " ".join(sys.argv[2:])
+        result = run_tool("smalltalk_evaluate", {"code": code})
 
-        print(result)
+    elif command == "browse":
+        if len(sys.argv) < 3:
+            print("Usage: smalltalk.py browse <className>")
+            sys.exit(1)
+        result = run_tool("smalltalk_browse", {"className": sys.argv[2]})
 
-    finally:
-        client.stop()
+    elif command == "method-source":
+        if len(sys.argv) < 4:
+            print("Usage: smalltalk.py method-source <className> <selector>")
+            sys.exit(1)
+        result = run_tool("smalltalk_method_source", {
+            "className": sys.argv[2],
+            "selector": sys.argv[3]
+        })
+
+    elif command == "define-class":
+        if len(sys.argv) < 3:
+            print("Usage: smalltalk.py define-class <definition>")
+            sys.exit(1)
+        result = run_tool("smalltalk_define_class", {
+            "definition": " ".join(sys.argv[2:])
+        })
+
+    elif command == "define-method":
+        if len(sys.argv) < 4:
+            print("Usage: smalltalk.py define-method <className> <source>")
+            sys.exit(1)
+        class_name = sys.argv[2]
+        source = " ".join(sys.argv[3:])
+        result = run_tool("smalltalk_define_method", {
+            "className": class_name,
+            "source": source,
+        })
+
+    elif command == "delete-method":
+        if len(sys.argv) < 4:
+            print("Usage: smalltalk.py delete-method <className> <selector>")
+            sys.exit(1)
+        result = run_tool("smalltalk_delete_method", {
+            "className": sys.argv[2],
+            "selector": sys.argv[3]
+        })
+
+    elif command == "delete-class":
+        if len(sys.argv) < 3:
+            print("Usage: smalltalk.py delete-class <className>")
+            sys.exit(1)
+        result = run_tool("smalltalk_delete_class", {"className": sys.argv[2]})
+
+    elif command == "list-classes":
+        prefix = sys.argv[2] if len(sys.argv) > 2 else ""
+        result = run_tool("smalltalk_list_classes", {"prefix": prefix})
+
+    elif command == "hierarchy":
+        if len(sys.argv) < 3:
+            print("Usage: smalltalk.py hierarchy <className>")
+            sys.exit(1)
+        result = run_tool("smalltalk_hierarchy", {"className": sys.argv[2]})
+
+    elif command == "subclasses":
+        if len(sys.argv) < 3:
+            print("Usage: smalltalk.py subclasses <className>")
+            sys.exit(1)
+        result = run_tool("smalltalk_subclasses", {"className": sys.argv[2]})
+
+    elif command == "list-categories":
+        result = run_tool("smalltalk_list_categories", {})
+
+    elif command == "classes-in-category":
+        if len(sys.argv) < 3:
+            print("Usage: smalltalk.py classes-in-category <category>")
+            sys.exit(1)
+        result = run_tool("smalltalk_classes_in_category", {
+            "category": sys.argv[2]
+        })
+
+    else:
+        print(f"Unknown command: {command}")
+        print_usage()
+        sys.exit(1)
+
+    print(result)
 
 
 if __name__ == "__main__":

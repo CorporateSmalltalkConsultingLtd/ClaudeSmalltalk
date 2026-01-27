@@ -55,7 +55,9 @@ Copy the skill to your Clawdbot skills directory:
 mkdir -p ~/clawd/skills/smalltalk
 cp clawdbot/SKILL.md ~/clawd/skills/smalltalk/
 cp clawdbot/smalltalk.py ~/clawd/skills/smalltalk/
+cp clawdbot/smalltalk-daemon.py ~/clawd/skills/smalltalk/
 chmod +x ~/clawd/skills/smalltalk/smalltalk.py
+chmod +x ~/clawd/skills/smalltalk/smalltalk-daemon.py
 ```
 
 ## Step 6: Configure Paths (Optional)
@@ -79,19 +81,108 @@ Expected output:
 ```
 🔍 Checking Clawdbot Smalltalk setup...
 
+ℹ️  Daemon not running (will use exec mode)
+   Start with: smalltalk-daemon.py start
+
 ✅ xvfb-run found
 ✅ VM found: /home/user/Squeak6.0-.../bin/squeak
 ✅ Image found: /home/user/ClaudeSqueak.image
 ✅ Sources file found: /home/user/SqueakV60.sources
 
+🔍 Checking MCPServer version...
+✅ MCPServer version: 2
+
 ✅ Setup looks good!
 ```
+
+**Note:** MCPServer version 2+ is required for `define-method` to work correctly in headless mode. If you see version 0 or 1, update your image by filing in `MCP-Server-Squeak.st`.
 
 ## Step 8: Test
 
 ```bash
 python3 ~/clawd/skills/smalltalk/smalltalk.py evaluate "3 factorial"
 # Should output: 6
+```
+
+## Exec Mode vs Daemon Mode
+
+The skill supports two operating modes:
+
+### Exec Mode (Default)
+
+- Spawns a fresh Squeak VM for each command
+- State does **not** persist between calls
+- Best for: read-only queries (browse, evaluate, hierarchy, etc.)
+
+### Daemon Mode (Persistent State)
+
+- Keeps a single Squeak VM running
+- State **persists** across calls (classes/methods you define stay in memory)
+- Best for: development sessions where you define classes and methods
+
+### Starting the Daemon
+
+Use `nohup` to prevent the daemon from being killed by process wrappers:
+
+```bash
+nohup python3 ~/clawd/skills/smalltalk/smalltalk-daemon.py start > /tmp/smalltalk-daemon.log 2>&1 &
+```
+
+Verify it's running:
+
+```bash
+python3 ~/clawd/skills/smalltalk/smalltalk.py --daemon-status
+# Should output: ✅ Daemon running (fast mode)
+```
+
+### Daemon Commands
+
+```bash
+smalltalk-daemon.py start    # Start daemon (foreground by default)
+smalltalk-daemon.py stop     # Stop running daemon
+smalltalk-daemon.py status   # Check if daemon is running
+smalltalk-daemon.py restart  # Restart daemon
+```
+
+### Stopping the Daemon
+
+```bash
+python3 ~/clawd/skills/smalltalk/smalltalk-daemon.py stop
+```
+
+Or kill all related processes:
+
+```bash
+pkill -f smalltalk-daemon
+pkill -f squeak
+pkill -f Xvfb
+```
+
+### Systemd Service (Optional)
+
+For auto-start on boot, create `~/.config/systemd/user/smalltalk-daemon.service`:
+
+```ini
+[Unit]
+Description=Smalltalk MCP Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/clawd/skills/smalltalk/smalltalk-daemon.py start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Enable with:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable smalltalk-daemon
+systemctl --user start smalltalk-daemon
 ```
 
 ## Usage with Clawdbot
@@ -186,6 +277,8 @@ Then log out and back in.
 
 ## Architecture
 
+### Exec Mode (Fresh VM per call)
+
 ```
 Clawdbot
     │
@@ -193,7 +286,25 @@ Clawdbot
 smalltalk.py
     │
     ▼ xvfb-run + stdio
-Squeak VM + ClaudeSqueak.image
+Squeak VM + ClaudeSqueak.image  (spawned, then exits)
+    │
+    ▼ MCP JSON-RPC
+MCPServer (12 tools)
+```
+
+### Daemon Mode (Persistent VM)
+
+```
+Clawdbot
+    │
+    ▼ exec
+smalltalk.py
+    │
+    ▼ Unix socket (/tmp/smalltalk-daemon.sock)
+smalltalk-daemon.py
+    │
+    ▼ stdio (persistent connection)
+Squeak VM + ClaudeSqueak.image  (long-running)
     │
     ▼ MCP JSON-RPC
 MCPServer (12 tools)
