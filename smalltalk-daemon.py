@@ -16,7 +16,6 @@ The daemon listens on /tmp/smalltalk-daemon.sock
 Author: John M McIntosh / Simba
 """
 
-import fcntl
 import glob
 import json
 import os
@@ -26,13 +25,11 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
-# User-isolated paths to support multiple users on the same machine
-USER = os.environ.get("USER", "unknown")
-SOCKET_PATH = f"/tmp/smalltalk-daemon-{USER}.sock"
-PID_FILE = f"/tmp/smalltalk-daemon-{USER}.pid"
-LOCK_FILE = f"/tmp/smalltalk-daemon-{USER}.lock"
+SOCKET_PATH = "/tmp/smalltalk-daemon.sock"
+PID_FILE = "/tmp/smalltalk-daemon.pid"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
@@ -80,13 +77,10 @@ class SmalltalkDaemon:
         self.running = False
         self._request_id = 0
         self._lock = threading.Lock()
-        # Dedicated lock to protect request ID increments from race conditions
-        self._id_lock = threading.Lock()
 
     def _next_id(self) -> int:
-        with self._id_lock:
-            self._request_id += 1
-            return self._request_id
+        self._request_id += 1
+        return self._request_id
 
     def start_vm(self) -> bool:
         """Start the Squeak VM subprocess."""
@@ -175,17 +169,11 @@ class SmalltalkDaemon:
             "^ ''Method defined successfully''.' classified: 'tool implementations'"
         )
         
-        response = self._send_to_vm("tools/call", {
+        self._send_to_vm("tools/call", {
             "name": "smalltalk_evaluate", 
             "arguments": {"code": fix_code}
         })
 
-        # Treat any reported error or unexpected response type as a hotfix failure
-        if not isinstance(response, dict) or "error" in response:
-            error_detail = None
-            if isinstance(response, dict):
-                error_detail = response.get("error")
-            raise RuntimeError(f"Hotfix 'toolDefineMethod' failed: {error_detail}")
     def stop_vm(self) -> None:
         """Stop the Squeak VM subprocess."""
         if self.process is not None:
@@ -195,14 +183,11 @@ class SmalltalkDaemon:
                 os.killpg(pgid, signal.SIGTERM)
                 self.process.wait(timeout=5)
             except (ProcessLookupError, OSError):
-                # Process/group is already gone or cannot be signaled; safe to ignore on shutdown.
                 pass
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(pgid, signal.SIGKILL)
                 except (ProcessLookupError, OSError):
-                    # If the process/group no longer exists at this point, nothing more to do.
-                    # If the process is already gone when sending SIGKILL, ignore the error.
                     pass
             self.process = None
             print("✅ VM stopped")
@@ -262,26 +247,18 @@ class SmalltalkDaemon:
 
     def call_tool(self, tool_name: str, arguments: dict) -> dict:
         """Call an MCP tool - thread-safe."""
-        # First, check VM state under the lock and, if it's alive, send the request.
         with self._lock:
-            if self.process is not None and self.process.poll() is None:
-                response = self._send_to_vm("tools/call", {
-                    "name": tool_name,
-                    "arguments": arguments
-                })
-                return response
+            # Check if VM died and restart if needed
+            if self.process is None or self.process.poll() is not None:
+                print("⚠️  VM died, restarting...")
+                if not self.start_vm():
+                    return {"error": "Failed to restart VM"}
 
-        # If we reach here, the VM is not running; restart it without holding the lock
-        print("⚠️  VM died, restarting...")
-        if not self.start_vm():
-            return {"error": "Failed to restart VM"}
-
-        # After a successful restart, serialize access to the VM again for the actual call
-        with self._lock:
             response = self._send_to_vm("tools/call", {
                 "name": tool_name,
                 "arguments": arguments
             })
+
             return response
 
     def handle_client(self, conn: socket.socket) -> None:
@@ -323,21 +300,19 @@ class SmalltalkDaemon:
         except socket.timeout:
             try:
                 conn.sendall((json.dumps({"error": "Request timed out"}) + "\n").encode("utf-8"))
-            except Exception:
-                # Best-effort attempt to send timeout error to client; ignore failures while sending.
+            except:
                 pass
         except Exception as e:
             print(f"❌ Client error: {e}")
             try:
                 conn.sendall((json.dumps({"error": str(e)}) + "\n").encode("utf-8"))
-            except Exception:
-                # Best-effort attempt to send error details to client; ignore failures while sending.
+            except:
                 pass
         finally:
             conn.close()
 
-    def initialize(self) -> bool:
-        """Initialize daemon (VM, socket, PID file). Returns True on success."""
+    def run(self) -> None:
+        """Main daemon loop."""
         # Clean up old socket
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
@@ -345,24 +320,13 @@ class SmalltalkDaemon:
         # Start VM
         if not self.start_vm():
             print("❌ Failed to start VM, exiting")
-            return False
+            sys.exit(1)
 
-        # Create socket with restrictive permissions (user-only)
-        old_umask = os.umask(0o177)
-        try:
-            self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.socket.bind(SOCKET_PATH)
-            self.socket.listen(5)
-        finally:
-            os.umask(old_umask)
-
-        # Ensure the socket file is only accessible by the owner
-        try:
-            os.chmod(SOCKET_PATH, 0o600)
-        except OSError:
-            # If chmod fails, continue running but leave a diagnostic message
-            print(f"⚠️  Could not set permissions on socket {SOCKET_PATH}")
+        # Create socket
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind(SOCKET_PATH)
+        self.socket.listen(5)
         self.socket.settimeout(1.0)  # Allow periodic checks
 
         # Write PID file
@@ -370,10 +334,6 @@ class SmalltalkDaemon:
             f.write(str(os.getpid()))
 
         print(f"🎧 Listening on {SOCKET_PATH}")
-        return True
-
-    def run(self) -> None:
-        """Main daemon loop."""
         self.running = True
 
         # Handle signals
@@ -436,63 +396,21 @@ def get_daemon_pid() -> Optional[int]:
 
 def cmd_start():
     """Start the daemon."""
-    # Use file locking to prevent race condition between checking
-    # if daemon is running and starting a new one
-    lock_fd = None
-    daemon = None
-    try:
-        # Open lock file and acquire exclusive lock (blocks until available)
-        lock_fd = os.open(LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o644)
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        
-        # Now that we have the lock, check if daemon is already running
-        pid = get_daemon_pid()
-        if pid:
-            print(f"❌ Daemon already running (PID {pid})")
-            # Release lock before exiting
-            if lock_fd is not None:
-                os.close(lock_fd)
-            sys.exit(1)
+    pid = get_daemon_pid()
+    if pid:
+        print(f"❌ Daemon already running (PID {pid})")
+        sys.exit(1)
 
-        vm_path, image_path = get_paths()
-        if not vm_path or not os.path.exists(vm_path):
-            print("❌ VM not found. Set SQUEAK_VM_PATH or run smalltalk.py --check")
-            # Release lock before exiting
-            if lock_fd is not None:
-                os.close(lock_fd)
-            sys.exit(1)
-        if not image_path or not os.path.exists(image_path):
-            print("❌ Image not found. Set SQUEAK_IMAGE_PATH or run smalltalk.py --check")
-            # Release lock before exiting
-            if lock_fd is not None:
-                os.close(lock_fd)
-            sys.exit(1)
+    vm_path, image_path = get_paths()
+    if not vm_path or not os.path.exists(vm_path):
+        print("❌ VM not found. Set SQUEAK_VM_PATH or run smalltalk.py --check")
+        sys.exit(1)
+    if not image_path or not os.path.exists(image_path):
+        print("❌ Image not found. Set SQUEAK_IMAGE_PATH or run smalltalk.py --check")
+        sys.exit(1)
 
-        daemon = SmalltalkDaemon(vm_path, image_path)
-        
-        # Initialize daemon (VM, socket, PID file) while holding lock
-        if not daemon.initialize():
-            # Release lock before exiting
-            if lock_fd is not None:
-                os.close(lock_fd)
-            sys.exit(1)
-        
-        # PID file is now written - release lock so other processes can detect running daemon
-        # Closing the file descriptor automatically releases the lock
-        os.close(lock_fd)
-        lock_fd = None  # Mark as closed so finally block doesn't try to close again
-        
-        # Run main daemon loop (no longer holding lock)
-        daemon.run()
-    finally:
-        # Release lock if still held (only happens if we exit before normal release)
-        if lock_fd is not None:
-            try:
-                os.close(lock_fd)
-            except (OSError, IOError):
-                # Ignore errors while releasing the lock; the process is exiting
-                # and the OS will clean up file descriptors and locks.
-                pass
+    daemon = SmalltalkDaemon(vm_path, image_path)
+    daemon.run()
 
 
 def cmd_stop():
@@ -529,14 +447,15 @@ def cmd_status():
         print(f"✅ Daemon running (PID {pid})")
         # Try to ping it
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.connect(SOCKET_PATH)
-                sock.sendall(b'{"tool": "__ping__"}\n')
-                response = sock.recv(4096).decode()
-                data = json.loads(response)
-                vm_pid = data.get("pid")
-                if vm_pid:
-                    print(f"   VM PID: {vm_pid}")
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(SOCKET_PATH)
+            sock.sendall(b'{"tool": "__ping__"}\n')
+            response = sock.recv(4096).decode()
+            sock.close()
+            data = json.loads(response)
+            vm_pid = data.get("pid")
+            if vm_pid:
+                print(f"   VM PID: {vm_pid}")
         except Exception as e:
             print(f"   ⚠️  Could not ping daemon: {e}")
     else:

@@ -1,44 +1,129 @@
 ---
 name: smalltalk
 description: Interact with live Smalltalk image (Cuis or Squeak). Use for evaluating Smalltalk code, browsing classes, viewing method source, defining classes/methods, querying hierarchy and categories.
-allowed-tools: squeakDirect/.*|cuisDirect/.*|claudeCuis/.*
-user-invocable: true
+metadata: {"clawdbot":{"emoji":"💎","requires":{"bins":["python3","xvfb-run"]}}}
 ---
 
-# Smalltalk Development Mode
+# Smalltalk Skill
 
-You have access to a **live Smalltalk image** via the MCP server (any of the four options).
+Execute Smalltalk code and browse live Squeak/Cuis images via MCP.
 
-**Note:** The MCP server name in tool calls depends on your configuration:
-- `squeakDirect` - Native Squeak MCP (Option C, recommended)
-- `cuisDirect` - Native Cuis MCP (Option B)
-- `claudeCuis` - Python/MQTT bridge (Option A)
+## Prerequisites
 
-## Available Tools
+**Get the ClaudeSmalltalk repo first:**
 
-| Tool | Description |
-|------|-------------|
-| `smalltalk_evaluate` | Execute Smalltalk code and return result |
-| `smalltalk_browse` | Get class metadata (superclass, instance vars, methods) |
-| `smalltalk_method_source` | View source code of a method |
-| `smalltalk_define_class` | Create or modify a class definition |
-| `smalltalk_define_method` | Add or update a method |
-| `smalltalk_delete_method` | Remove a method from a class |
-| `smalltalk_delete_class` | Remove a class from the system |
-| `smalltalk_list_classes` | List classes matching a prefix |
-| `smalltalk_hierarchy` | Get superclass chain for a class |
-| `smalltalk_subclasses` | Get immediate subclasses of a class |
-| `smalltalk_list_categories` | List all system categories |
-| `smalltalk_classes_in_category` | List classes in a category |
+```bash
+git clone https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk.git
+```
 
-## Examples
+This repo contains:
+- MCP server code for Squeak (`MCP-Server-Squeak.st`)
+- Setup documentation (`SQUEAK-SETUP.md`, `CLAWDBOT-SETUP.md`)
+- This Clawdbot skill (`clawdbot/`)
 
-- "Evaluate `3 + 4`" - runs code and returns result
-- "Browse the String class" - shows class metadata
-- "Show me Object>>yourself" - displays method source
-- "What subclasses does Collection have?" - queries hierarchy
+## Setup
+
+1. **Set up Squeak with MCP server** — see [SQUEAK-SETUP.md](https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk/blob/main/SQUEAK-SETUP.md)
+2. **Configure Clawdbot** — see [CLAWDBOT-SETUP.md](https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk/blob/main/CLAWDBOT-SETUP.md)
+
+## Usage
+
+```bash
+# Check setup
+python3 smalltalk.py --check
+
+# Evaluate code
+python3 smalltalk.py evaluate "3 factorial"
+python3 smalltalk.py evaluate "Date today"
+
+# Browse a class
+python3 smalltalk.py browse OrderedCollection
+
+# View method source
+python3 smalltalk.py method-source String asUppercase
+
+# List classes (with optional prefix filter)
+python3 smalltalk.py list-classes Collection
+
+# Get class hierarchy
+python3 smalltalk.py hierarchy OrderedCollection
+
+# Get subclasses  
+python3 smalltalk.py subclasses Collection
+
+# List all categories
+python3 smalltalk.py list-categories
+
+# List classes in a category
+python3 smalltalk.py classes-in-category "Collections-Sequenceable"
+
+# Define a new class
+python3 smalltalk.py define-class "Object subclass: #Counter instanceVariableNames: 'count' classVariableNames: '' poolDictionaries: '' category: 'MyApp'"
+
+# Define a method
+python3 smalltalk.py define-method Counter "increment
+    count := (count ifNil: [0]) + 1.
+    ^ count"
+
+# Delete a method
+python3 smalltalk.py delete-method Counter increment
+
+# Delete a class
+python3 smalltalk.py delete-class Counter
+```
+
+## Operating Modes
+
+### Exec Mode (Default)
+Each command spawns a fresh VM. State does not persist between calls.
+Best for read-only queries (browse, evaluate, hierarchy).
+
+### Daemon Mode (Persistent)
+A single VM stays running. State persists across calls.
+Best for development sessions with define-class/define-method.
+
+```bash
+# Start daemon (use nohup to prevent SIGKILL)
+nohup python3 smalltalk-daemon.py start > /tmp/daemon.log 2>&1 &
+
+# Check status
+python3 smalltalk.py --daemon-status
+
+# Stop daemon
+python3 smalltalk-daemon.py stop
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `--check` | Verify VM/image paths and dependencies |
+| `--daemon-status` | Check if daemon is running |
+| `--debug` | Debug hung system (sends SIGUSR1, captures stack trace) |
+| `evaluate <code>` | Execute Smalltalk code, return result |
+| `browse <class>` | Get class metadata (superclass, ivars, methods) |
+| `method-source <class> <selector>` | View method source code |
+| `define-class <definition>` | Create or modify a class |
+| `define-method <class> <source>` | Add or update a method |
+| `delete-method <class> <selector>` | Remove a method |
+| `delete-class <class>` | Remove a class |
+| `list-classes [prefix]` | List classes, optionally filtered |
+| `hierarchy <class>` | Get superclass chain |
+| `subclasses <class>` | Get immediate subclasses |
+| `list-categories` | List all system categories |
+| `classes-in-category <cat>` | List classes in a category |
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `SQUEAK_VM_PATH` | Path to Squeak/Cuis VM executable |
+| `SQUEAK_IMAGE_PATH` | Path to Smalltalk image with MCP server |
 
 ## Notes
 
-- Results are returned as strings (use `printString` for objects)
-- Errors include stack traces for debugging
+- Requires xvfb for headless operation on Linux servers
+- Uses Squeak 6.0 MCP server (GUI stays responsive if display available)
+- `saveImage` intentionally excluded for safety
+- MCPServer version 2+ required for headless `define-method` (check with `--check`)
+- Daemon mode recommended for define-class/define-method workflows
