@@ -16,6 +16,7 @@ The daemon listens on /tmp/smalltalk-daemon.sock
 Author: John M McIntosh / Simba
 """
 
+import fcntl
 import glob
 import json
 import os
@@ -30,6 +31,7 @@ from typing import Optional
 
 SOCKET_PATH = "/tmp/smalltalk-daemon.sock"
 PID_FILE = "/tmp/smalltalk-daemon.pid"
+LOCK_FILE = "/tmp/smalltalk-daemon.lock"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
@@ -399,21 +401,39 @@ def get_daemon_pid() -> Optional[int]:
 
 def cmd_start():
     """Start the daemon."""
-    pid = get_daemon_pid()
-    if pid:
-        print(f"❌ Daemon already running (PID {pid})")
-        sys.exit(1)
+    # Use file locking to prevent race condition between checking
+    # if daemon is running and starting a new one
+    lock_fd = None
+    try:
+        # Open lock file and acquire exclusive lock (blocks until available)
+        lock_fd = os.open(LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o644)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        
+        # Now that we have the lock, check if daemon is already running
+        pid = get_daemon_pid()
+        if pid:
+            print(f"❌ Daemon already running (PID {pid})")
+            sys.exit(1)
 
-    vm_path, image_path = get_paths()
-    if not vm_path or not os.path.exists(vm_path):
-        print("❌ VM not found. Set SQUEAK_VM_PATH or run smalltalk.py --check")
-        sys.exit(1)
-    if not image_path or not os.path.exists(image_path):
-        print("❌ Image not found. Set SQUEAK_IMAGE_PATH or run smalltalk.py --check")
-        sys.exit(1)
+        vm_path, image_path = get_paths()
+        if not vm_path or not os.path.exists(vm_path):
+            print("❌ VM not found. Set SQUEAK_VM_PATH or run smalltalk.py --check")
+            sys.exit(1)
+        if not image_path or not os.path.exists(image_path):
+            print("❌ Image not found. Set SQUEAK_IMAGE_PATH or run smalltalk.py --check")
+            sys.exit(1)
 
-    daemon = SmalltalkDaemon(vm_path, image_path)
-    daemon.run()
+        daemon = SmalltalkDaemon(vm_path, image_path)
+        # Lock will be released when daemon exits (file descriptor closed)
+        daemon.run()
+    finally:
+        # Release lock if still held
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+            except:
+                pass
 
 
 def cmd_stop():
