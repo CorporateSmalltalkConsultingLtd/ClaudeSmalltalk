@@ -250,18 +250,26 @@ class SmalltalkDaemon:
 
     def call_tool(self, tool_name: str, arguments: dict) -> dict:
         """Call an MCP tool - thread-safe."""
+        # First, check VM state under the lock and, if it's alive, send the request.
         with self._lock:
-            # Check if VM died and restart if needed
-            if self.process is None or self.process.poll() is not None:
-                print("⚠️  VM died, restarting...")
-                if not self.start_vm():
-                    return {"error": "Failed to restart VM"}
+            if self.process is not None and self.process.poll() is None:
+                response = self._send_to_vm("tools/call", {
+                    "name": tool_name,
+                    "arguments": arguments
+                })
+                return response
 
+        # If we reach here, the VM is not running; restart it without holding the lock
+        print("⚠️  VM died, restarting...")
+        if not self.start_vm():
+            return {"error": "Failed to restart VM"}
+
+        # After a successful restart, serialize access to the VM again for the actual call
+        with self._lock:
             response = self._send_to_vm("tools/call", {
                 "name": tool_name,
                 "arguments": arguments
             })
-
             return response
 
     def handle_client(self, conn: socket.socket) -> None:
