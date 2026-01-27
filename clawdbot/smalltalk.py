@@ -644,6 +644,10 @@ def main():
             print_usage()
             sys.exit(1)
 
+        # Treat error sentinel strings from run_tool as failures
+        if isinstance(result, str) and result.startswith("Error:"):
+            print(result, file=sys.stderr)
+            sys.exit(1)
         print(result)
     except Exception as e:
         print(f"❌ Error executing command: {e}", file=sys.stderr)
