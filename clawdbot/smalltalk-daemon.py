@@ -77,10 +77,13 @@ class SmalltalkDaemon:
         self.running = False
         self._request_id = 0
         self._lock = threading.Lock()
+        # Dedicated lock to protect request ID increments from race conditions
+        self._id_lock = threading.Lock()
 
     def _next_id(self) -> int:
-        self._request_id += 1
-        return self._request_id
+        with self._id_lock:
+            self._request_id += 1
+            return self._request_id
 
     def start_vm(self) -> bool:
         """Start the Squeak VM subprocess."""
