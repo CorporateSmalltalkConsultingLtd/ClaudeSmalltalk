@@ -439,7 +439,8 @@ def debug_squeak():
     html = f'''<!DOCTYPE html>
 <html>
 <head>
-<title>ClaudeSmalltalk Debug Report - {timestamp}</title>
+<meta charset="UTF-8">
+<title>🔧 ClaudeSmalltalk Debug Report - {timestamp}</title>
 <style>
 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; margin: 20px; background: #f5f5f5; }}
 .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
