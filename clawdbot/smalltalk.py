@@ -227,6 +227,9 @@ def check_setup() -> bool:
             # Use daemon if running (avoids spawning second VM)
             if daemon_available():
                 version_str = call_daemon("smalltalk_evaluate", {"code": "MCPServer version"})
+                # call_daemon returns formatted string, may include "Error: ..."
+                if version_str.startswith("Error:"):
+                    raise RuntimeError(f"Daemon call failed: {version_str}")
             else:
                 # No daemon running - spawn a quick VM to check
                 result = subprocess.run(
@@ -250,7 +253,12 @@ def check_setup() -> bool:
                             # Ignore lines that are not valid JSON or don't match expected structure
                             pass
             
-            version = int(version_str)
+            # Parse version number, handling potential non-numeric responses
+            try:
+                version = int(version_str.strip())
+            except ValueError:
+                raise RuntimeError(f"Invalid version response: {version_str}")
+            
             if version >= 2:
                 print(f"✅ MCPServer version: {version}")
             else:
