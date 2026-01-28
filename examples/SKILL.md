@@ -74,22 +74,18 @@ python3 smalltalk.py delete-class Counter
 
 ## Operating Modes
 
-### Exec Mode (Default)
-Each command spawns a fresh VM. State does not persist between calls.
-Best for read-only queries (browse, evaluate, hierarchy).
+### Daemon Mode (Default, Auto-Start)
+Commands communicate with a long-running Smalltalk daemon over a Unix socket.
+The daemon is automatically started on the first command (lazy start).
+State persists across calls, making it ideal for development sessions.
 
-### Daemon Mode (Persistent)
-A single VM stays running. State persists across calls.
-Best for development sessions with define-class/define-method.
+Per-user socket isolation: `/tmp/smalltalk-daemon-{uid}.sock`
 
 ```bash
-# Start daemon (use nohup to prevent SIGKILL)
-nohup python3 smalltalk-daemon.py start > /tmp/daemon.log 2>&1 &
-
-# Check status
+# Check daemon status
 python3 smalltalk.py --daemon-status
 
-# Stop daemon
+# Manually stop daemon if needed
 python3 smalltalk-daemon.py stop
 ```
 

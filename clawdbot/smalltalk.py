@@ -2,9 +2,8 @@
 """
 Smalltalk CLI for Clawdbot
 
-Communicates with a Squeak/Cuis MCP server. Supports two modes:
-1. Daemon mode: Connect to running smalltalk-daemon (fast, persistent state)
-2. Exec mode: Start fresh VM per call (fallback if no daemon)
+Communicates with a Squeak/Cuis MCP server via a persistent daemon.
+The daemon is automatically started on first use (lazy start).
 
 Usage:
     smalltalk.py --check                    # Verify setup
@@ -29,12 +28,11 @@ import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
 from typing import Optional, Tuple
 
 # User-isolated socket path to support multiple users on the same machine
-USER = os.environ.get("USER", "unknown")
-DAEMON_SOCKET = f"/tmp/smalltalk-daemon-{USER}.sock"
+USER_UID = os.getuid()
+DAEMON_SOCKET = f"/tmp/smalltalk-daemon-{USER_UID}.sock"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
@@ -107,10 +105,10 @@ def start_daemon() -> bool:
     
     print("🚀 Starting Smalltalk daemon...", file=sys.stderr)
     
-    # Start daemon in background using nohup to survive parent exit
+    # Start daemon in background with new session (detached from parent)
     try:
         subprocess.Popen(
-            ["nohup", sys.executable, daemon_script, "start"],
+            [sys.executable, daemon_script, "start"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True
@@ -133,10 +131,9 @@ def start_daemon() -> bool:
 
 def call_daemon(tool_name: str, arguments: dict) -> str:
     """Call a tool via the daemon socket."""
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(60.0)  # 60 second timeout for slow tool calls
-    
-    try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(60.0)  # 60 second timeout for slow tool calls
+        
         sock.connect(DAEMON_SOCKET)
 
         request = {"tool": tool_name, "arguments": arguments}
@@ -172,11 +169,8 @@ def call_daemon(tool_name: str, arguments: dict) -> str:
         if content and isinstance(content, list):
             return content[0].get("text", str(result))
         return str(result)
-    
-    finally:
-        pass
 
-    sock.close()
+
 def check_setup() -> bool:
     """Verify all dependencies and paths are correct."""
     print("🔍 Checking Clawdbot Smalltalk setup...\n")
@@ -184,10 +178,9 @@ def check_setup() -> bool:
 
     # Check daemon status
     if daemon_available():
-        print("✅ Daemon running (fast mode available)")
+        print("✅ Daemon running")
     else:
-        print("ℹ️  Daemon not running (will use exec mode)")
-        print("   Start with: smalltalk-daemon.py start")
+        print("ℹ️  Daemon not running (will auto-start on first command)")
 
     print()
 
@@ -254,6 +247,7 @@ def check_setup() -> bool:
                                 version_str = content[0].get("text", "0")
                                 break
                         except (json.JSONDecodeError, ValueError, KeyError):
+                            # Ignore lines that are not valid JSON or don't match expected structure
                             pass
             
             version = int(version_str)
@@ -275,120 +269,6 @@ def check_setup() -> bool:
         print("❌ Setup incomplete - see errors above")
 
     return all_ok
-
-
-class MCPClient:
-    """Simple MCP client for Smalltalk interaction (exec mode)."""
-
-    def __init__(self, vm_path: str, image_path: str):
-        self.vm_path = vm_path
-        self.image_path = image_path
-        self.process: Optional[subprocess.Popen] = None
-        self._request_id = 0
-
-    def start(self) -> None:
-        """Start the Smalltalk MCP server subprocess."""
-        if self.process is not None:
-            return
-
-        # Use xvfb-run for headless operation
-        cmd = ["xvfb-run", "-a", self.vm_path, self.image_path, "--mcp"]
-
-        self.process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            start_new_session=True,  # Create process group for clean shutdown
-        )
-
-        # Initialize MCP connection
-        self._initialize()
-
-    def stop(self) -> None:
-        """Stop the subprocess and all children (Xvfb, Squeak VM)."""
-        if self.process is not None:
-            try:
-                # Kill the entire process group, not just the wrapper
-                pgid = os.getpgid(self.process.pid)
-                os.killpg(pgid, signal.SIGTERM)
-                self.process.wait(timeout=5)
-            except (ProcessLookupError, OSError):
-                # Already dead
-                pass
-            except subprocess.TimeoutExpired:
-                # Force kill if SIGTERM didn't work
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                except (ProcessLookupError, OSError):
-                    pass
-            self.process = None
-
-    def _next_id(self) -> int:
-        self._request_id += 1
-        return self._request_id
-
-    def _send(self, method: str, params: Optional[dict] = None) -> dict:
-        """Send JSON-RPC request and get response."""
-        if self.process is None:
-            raise RuntimeError("MCP server not started")
-
-        request = {
-            "jsonrpc": "2.0",
-            "id": self._next_id(),
-            "method": method,
-        }
-        if params is not None:
-            request["params"] = params
-
-        self.process.stdin.write(json.dumps(request) + "\n")
-        self.process.stdin.flush()
-
-        # Read response, skipping non-JSON lines (stderr warnings etc)
-        while True:
-            response_line = self.process.stdout.readline()
-            if not response_line:
-                raise RuntimeError("No response from MCP server")
-            response_line = response_line.strip()
-            if response_line.startswith("{"):
-                return json.loads(response_line)
-
-    def _initialize(self) -> None:
-        """Initialize the MCP connection."""
-        response = self._send("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "clawdbot-smalltalk", "version": "1.0.0"}
-        })
-
-        if "error" in response:
-            raise RuntimeError(f"MCP init failed: {response['error']}")
-
-        # Send initialized notification
-        self.process.stdin.write(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized"
-        }) + "\n")
-        self.process.stdin.flush()
-
-    def call_tool(self, tool_name: str, arguments: dict) -> str:
-        """Call an MCP tool and return the result."""
-        response = self._send("tools/call", {
-            "name": tool_name,
-            "arguments": arguments
-        })
-
-        if "error" in response:
-            return f"Error: {response['error'].get('message', 'Unknown error')}"
-
-        result = response.get("result", {})
-        content = result.get("content", [])
-
-        if content and isinstance(content, list):
-            return content[0].get("text", str(result))
-        return str(result)
 
 
 def debug_squeak():
@@ -544,8 +424,8 @@ def print_usage():
     print("  list-categories              - List categories")
     print("  classes-in-category <cat>    - List classes in category")
     print("\nModes:")
-    print("  If smalltalk-daemon is running, uses fast persistent mode.")
-    print("  Otherwise falls back to exec mode (fresh VM per call).")
+    print("  Uses persistent daemon mode (auto-starts on first command).")
+    print("  State persists across calls.")
     print("\nEnvironment:")
     print("  SQUEAK_VM_PATH     - Path to VM (auto-detected if not set)")
     print("  SQUEAK_IMAGE_PATH  - Path to image (auto-detected if not set)")
@@ -580,10 +460,9 @@ def main():
     # Handle --daemon-status
     if command in ("--daemon-status", "--status"):
         if daemon_available():
-            print("✅ Daemon running (fast mode)")
+            print("✅ Daemon running")
         else:
-            print("❌ Daemon not running (exec mode)")
-            print("   Start with: smalltalk-daemon.py start")
+            print("ℹ️  Daemon not running (will auto-start on first command)")
         sys.exit(0)
 
     # Handle --debug

@@ -11,7 +11,7 @@ Usage:
     smalltalk-daemon.py status      # Check if daemon is running
     smalltalk-daemon.py restart     # Restart daemon
 
-The daemon listens on /tmp/smalltalk-daemon.sock
+The daemon listens on /tmp/smalltalk-daemon-{uid}.sock (per-user isolation)
 
 Author: John M McIntosh / Simba
 """
@@ -29,10 +29,10 @@ import time
 from typing import Optional
 
 # User-isolated paths to support multiple users on the same machine
-USER = os.environ.get("USER", "unknown")
-SOCKET_PATH = f"/tmp/smalltalk-daemon-{USER}.sock"
-PID_FILE = f"/tmp/smalltalk-daemon-{USER}.pid"
-LOCK_FILE = f"/tmp/smalltalk-daemon-{USER}.lock"
+USER_UID = os.getuid()
+SOCKET_PATH = f"/tmp/smalltalk-daemon-{USER_UID}.sock"
+PID_FILE = f"/tmp/smalltalk-daemon-{USER_UID}.pid"
+LOCK_FILE = f"/tmp/smalltalk-daemon-{USER_UID}.lock"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
