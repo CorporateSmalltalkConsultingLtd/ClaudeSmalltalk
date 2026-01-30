@@ -1,6 +1,6 @@
 # OpenAI Bridge for Squeak MCP Server
 
-This guide explains how to set up the OpenAI bridge that connects ChatGPT to the Squeak MCP server, allowing ChatGPT to execute Smalltalk code via the same 12 tools that Claude Code uses.
+This guide explains how to set up the OpenAI bridge that connects ChatGPT to the Squeak MCP server, allowing ChatGPT to execute Smalltalk code via the same 14 tools that Claude Code uses.
 
 ## Architecture
 
@@ -46,7 +46,7 @@ Quick summary:
 2. Install OSProcess package via Monticello
 3. File in MCP-Server-Squeak.st
 4. Register startup: Smalltalk addToStartUpList: MCPServer
-5. Save image as ClaudeSqueak6.0.image
+5. Save image as ClaudeSqueak.image
 
 ### 4. Configure Environment Variables
 
@@ -58,7 +58,7 @@ Optional (with defaults shown):
 
     export OPENAI_MODEL="gpt-4o"
     export SQUEAK_VM_PATH="/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak"
-    export SQUEAK_IMAGE_PATH="/path/to/ClaudeSqueak6.0.image"
+    export SQUEAK_IMAGE_PATH="/path/to/ClaudeSqueak.image"
 
 ## Usage
 
@@ -88,6 +88,10 @@ This starts an interactive chat session where you can ask ChatGPT questions abou
 | smalltalk_subclasses | Get immediate subclasses of a class |
 | smalltalk_list_categories | List all system categories |
 | smalltalk_classes_in_category | List classes in a category |
+| smalltalk_save_image | Save the current image in place (dev mode only) |
+| smalltalk_save_as_new_version | Save image/changes as next version number (dev mode only) |
+
+**Note:** `smalltalk_save_image` and `smalltalk_save_as_new_version` are only available when `SMALLTALK_DEV_MODE=1`. The OpenAI bridge uses `--mcp` mode which runs in playground mode by default.
 
 ## Environment Variables
 

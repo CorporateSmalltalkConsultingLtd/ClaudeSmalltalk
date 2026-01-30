@@ -23,7 +23,7 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 - **Responsive GUI** - Cuis GUI remains responsive during MCP operations
 - Uses OSProcess with `BufferedAsyncFileReadStream` for non-blocking stdio
 - Claude spawns the Cuis image directly
-- 12 tools available (saveImage intentionally excluded for safety)
+- 14 tools available (includes save tools in dev mode, class-side method support in v7)
 
 ### Option C: Squeak Native MCP (RECOMMENDED for Squeak)
 
@@ -37,7 +37,7 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
 - **Responsive GUI** - Squeak GUI remains responsive during MCP operations
 - Uses OSProcess with `BufferedAsyncFileReadStream` for non-blocking stdio
-- 12 tools available (same as Cuis)
+- 14 tools available (v7 — class-side method support, save tools in dev mode)
 - Server-side processing: 0-3ms per request
 
 ### Option A: Python/MQTT Bridge
@@ -62,7 +62,7 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 └─────────────┘                └─────────────────┘                 └─────────────────┘
 ```
 
-- Enables **ChatGPT** to execute Smalltalk code via the same 12 tools
+- Enables **ChatGPT** to execute Smalltalk code via the same 14 tools
 - Requires Python 3.10+ and OpenAI API key
 - See [OPENAI-SETUP.md](OPENAI-SETUP.md) for detailed instructions
 
@@ -77,6 +77,9 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 ```
 
 - Enables **Clawdbot** (Telegram/Discord AI agent) to interact with Smalltalk
+- Persistent daemon mode with Unix socket — VM stays running between conversations
+- Playground mode (ephemeral) and dev mode (persistent) with project management
+- LLM-powered explain and audit tools (requires OpenAI API key)
 - Includes debug tools: `--check` (verify setup) and `--debug` (SIGUSR1 stack trace + screenshot)
 - See [CLAWDBOT-SETUP.md](CLAWDBOT-SETUP.md) for detailed instructions
 
@@ -371,8 +374,8 @@ This generates `/tmp/ClaudeSmalltalkDebug_YYYYMMDD_HHMMSS.html` with:
 | Tool | Description |
 |------|-------------|
 | `smalltalk_evaluate` | Execute Smalltalk code and return result |
-| `smalltalk_browse` | Get class metadata (superclass, instance vars, methods) |
-| `smalltalk_method_source` | View source code of a method |
+| `smalltalk_browse` | Get class metadata (superclass, instance vars, instance `methods` and `classMethods`) |
+| `smalltalk_method_source` | View source code of a method (supports `side` param for class-side methods) |
 | `smalltalk_define_class` | Create or modify a class definition |
 | `smalltalk_define_method` | Add or update a method |
 | `smalltalk_delete_method` | Remove a method from a class |
@@ -382,6 +385,10 @@ This generates `/tmp/ClaudeSmalltalkDebug_YYYYMMDD_HHMMSS.html` with:
 | `smalltalk_subclasses` | Get immediate subclasses of a class |
 | `smalltalk_list_categories` | List all system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
+| `smalltalk_save_image` | Save the current image in place (dev mode only) |
+| `smalltalk_save_as_new_version` | Save image/changes as next version number (dev mode only) |
+
+**Note:** `smalltalk_save_image` and `smalltalk_save_as_new_version` are only available when `SMALLTALK_DEV_MODE=1`. In playground mode (default), these return errors.
 
 ## Usage Examples
 
@@ -390,6 +397,7 @@ Once configured, you can ask Claude:
 - "Evaluate `3 factorial` in Smalltalk"
 - "Browse the OrderedCollection class"
 - "Show me the source of String>>asUppercase"
+- "Show me the class method MCPServer class>>version"
 - "What are the subclasses of Collection?"
 - "Create a new class called Counter with an instance variable 'count'"
 
