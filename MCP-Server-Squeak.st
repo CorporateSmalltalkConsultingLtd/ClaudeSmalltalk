@@ -394,17 +394,22 @@ toolDefListClasses
 toolDefMethodSource
 	^ (Dictionary new)
 		at: 'name' put: 'smalltalk_method_source';
-		at: 'description' put: 'Get the source code of a specific method.';
+		at: 'description' put: 'Get the source code of a specific method. Use side=class for class-side methods, or append " class" to className.';
 		at: 'inputSchema' put: ((Dictionary new)
 			at: 'type' put: 'object';
 			at: 'properties' put: ((Dictionary new)
 				at: 'className' put: ((Dictionary new)
 					at: 'type' put: 'string';
-					at: 'description' put: 'Name of the class';
+					at: 'description' put: 'Name of the class (append " class" for class-side, e.g. "MCPServer class")';
 					yourself);
 				at: 'selector' put: ((Dictionary new)
 					at: 'type' put: 'string';
 					at: 'description' put: 'Method selector';
+					yourself);
+				at: 'side' put: ((Dictionary new)
+					at: 'type' put: 'string';
+					at: 'enum' put: #('instance' 'class');
+					at: 'description' put: 'Which side to look up: instance (default) or class';
 					yourself);
 				yourself);
 			at: 'required' put: #('className' 'selector');
@@ -428,6 +433,28 @@ toolDefSubclasses
 			yourself);
 		yourself.! !
 
+!MCPServer methodsFor: 'tool definitions' stamp: 'jmm 1/29/2026 20:20'!
+toolDefSaveImage
+	^ (Dictionary new)
+		at: 'name' put: 'smalltalk_save_image';
+		at: 'description' put: 'Save the current image in place. Only available in dev mode.';
+		at: 'inputSchema' put: ((Dictionary new)
+			at: 'type' put: 'object';
+			at: 'properties' put: Dictionary new;
+			yourself);
+		yourself.! !
+
+!MCPServer methodsFor: 'tool definitions' stamp: 'jmm 1/29/2026 20:20'!
+toolDefSaveAsNewVersion
+	^ (Dictionary new)
+		at: 'name' put: 'smalltalk_save_as_new_version';
+		at: 'description' put: 'Save the image/changes using the next available version number. Only available in dev mode.';
+		at: 'inputSchema' put: ((Dictionary new)
+			at: 'type' put: 'object';
+			at: 'properties' put: Dictionary new;
+			yourself);
+		yourself.! !
+
 !MCPServer methodsFor: 'tool definitions' stamp: 'Claude 1/21/2026 12:00'!
 toolDefinitions
 	"Return all tool definitions for MCP tools/list"
@@ -443,7 +470,9 @@ toolDefinitions
 		self toolDefHierarchy.
 		self toolDefSubclasses.
 		self toolDefListCategories.
-		self toolDefClassesInCategory
+		self toolDefClassesInCategory.
+		self toolDefSaveImage.
+		self toolDefSaveAsNewVersion
 	}.! !
 
 !MCPServer methodsFor: 'tool dispatch' stamp: 'Claude 1/21/2026 12:00'!
@@ -461,11 +490,14 @@ executeTool: name arguments: args
 	name = 'smalltalk_subclasses' ifTrue: [ ^ self toolSubclasses: args ].
 	name = 'smalltalk_list_categories' ifTrue: [ ^ self toolListCategories: args ].
 	name = 'smalltalk_classes_in_category' ifTrue: [ ^ self toolClassesInCategory: args ].
+	name = 'smalltalk_save_image' ifTrue: [ ^ self toolSaveImage: args ].
+	name = 'smalltalk_save_as_new_version' ifTrue: [ ^ self toolSaveAsNewVersion: args ].
 	self error: 'Unknown tool: ', name.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
 toolBrowse: args
-	"Browse a class - return metadata as JSON"
+	"Browse a class - return metadata as JSON.
+	 Includes both instance-side and class-side methods."
 	| className class result |
 	className := args at: 'className' ifAbsent: [ '' ].
 	className isEmpty ifTrue: [ self error: 'No className provided' ].
@@ -480,7 +512,8 @@ toolBrowse: args
 	result at: 'instanceVariables' put: class instVarNames asArray.
 	result at: 'classVariables' put: class classVarNames asArray.
 	result at: 'methods' put: class selectors asArray sorted.
-	result at: 'comment' put: (class comment ifNil: [ '' ]).
+	result at: 'classMethods' put: class class selectors asArray sorted.
+	result at: 'comment' put: ([ class comment ifNil: [ '' ] ] on: Error do: [ :e | '' ]).
 	^ Json render: result.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
@@ -588,18 +621,39 @@ toolListClasses: args
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
 toolMethodSource: args
-	"Get source code of a method"
-	| className selector class method |
+	"Get source code of a method. Supports both instance and class side.
+	 Class side can be requested via side='class' parameter or by appending
+	 ' class' to className (e.g. 'MCPServer class')."
+	| className selector side class target method displayName |
 	className := args at: 'className' ifAbsent: [ '' ].
 	selector := args at: 'selector' ifAbsent: [ '' ].
+	side := args at: 'side' ifAbsent: [ 'instance' ].
 	className isEmpty ifTrue: [ self error: 'No className provided' ].
 	selector isEmpty ifTrue: [ self error: 'No selector provided' ].
+	
+	"Handle 'ClassName class' syntax in className"
+	(className endsWith: ' class') ifTrue: [
+		className := className copyFrom: 1 to: className size - 6.
+		side := 'class' ].
+	
 	class := Smalltalk at: className asSymbol ifAbsent: [
 		self error: 'Class not found: ', className ].
-	(class includesSelector: selector asSymbol) ifFalse: [
-		self error: 'Method not found: ', className, '>>', selector ].
-	method := class >> selector asSymbol.
-	^ method getSourceFromFile asString.! !
+	
+	target := side = 'class'
+		ifTrue: [ class class ]
+		ifFalse: [ class ].
+	displayName := side = 'class'
+		ifTrue: [ className, ' class' ]
+		ifFalse: [ className ].
+	
+	(target includesSelector: selector asSymbol) ifFalse: [
+		self error: 'Method not found: ', displayName, '>>', selector ].
+	method := target >> selector asSymbol.
+	"Try source file first, fall back to decompilation if .changes is unavailable
+	 (e.g. playground mode where changes → /dev/null)"
+	^ [ method getSourceFromFile asString ]
+		on: Error
+		do: [ :e | method decompileString ].! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
 toolSubclasses: args
@@ -612,38 +666,244 @@ toolSubclasses: args
 	names := (class subclasses collect: [ :c | c name ]) asArray sorted.
 	^ Json render: names.! !
 
-!MCPServer class methodsFor: 'system startup' stamp: 'Claude 1/21/2026 12:00'!
+!MCPServer methodsFor: 'tool implementations' stamp: 'jmm 1/29/2026 21:00'!
+toolSaveImage: args
+	"Save the current image in place. Only works in dev mode.
+	Uses headlessSave which skips Cursor/Morphic UI operations."
+	| changesFile |
+	changesFile := SourceFiles at: 2.
+	(changesFile isNil or: [ changesFile name = '/dev/null' ])
+		ifTrue: [ self error: 'Save is only available in dev mode. Start with --dev --image.' ].
+	self class headlessSave.
+	^ 'Image saved: ', Smalltalk imageName.! !
+
+!MCPServer methodsFor: 'tool implementations' stamp: 'jmm 1/29/2026 21:00'!
+toolSaveAsNewVersion: args
+	"Save image/changes as next version number. Only works in dev mode.
+	Uses headlessSaveAsNewVersion to avoid UI hangs under xvfb."
+	| changesFile |
+	changesFile := SourceFiles at: 2.
+	(changesFile isNil or: [ changesFile name = '/dev/null' ])
+		ifTrue: [ self error: 'Save is only available in dev mode. Start with --dev --image.' ].
+	self class headlessSaveAsNewVersion.
+	^ 'Saved as new version: ', Smalltalk imageName.! !
+
+!MCPServer class methodsFor: 'system startup' stamp: 'jmm 1/30/2026 03:45'!
+getenv: varName
+	"Portable environment variable access.
+	 Cuis has Smalltalk getenv: built in.
+	 Squeak 6.0 does not — must use OSProcess.
+	 Returns the value as a String, or nil if not set.
+	 
+	 Note: In startUp:, this is called BEFORE OSProcess session refresh.
+	 That is safe because OSProcess environment access reads /proc/self/environ
+	 (or equivalent) which does not depend on session state."
+	
+	(Smalltalk respondsTo: #getenv:) ifTrue: [
+		^ Smalltalk getenv: varName ].
+	
+	"Squeak with OSProcess"
+	^ [ | env |
+		env := OSProcess thisOSProcess environment.
+		env at: varName ifAbsent: [ nil ] ]
+	on: Error do: [ :e | nil ].! !
+
+!MCPServer class methodsFor: 'system startup' stamp: 'jmm 1/30/2026 03:45'!
 startUp: resuming
-	"Called on image startup - check for --mcp flag"
+	"Called on image startup. Two modes:
+	 1. --mcp flag: Original Claude Code MCP mode (forked, background)
+	 2. SMALLTALK_MCP_DAEMON=1 env var: Daemon mode (inline, blocking)
+	 
+	 Daemon mode runs during processStartUpList: which fires BEFORE
+	 Project current wakeUpTopWindow — critical for headless operation
+	 under xvfb-run where Morphic operations would block."
 	| args |
 	resuming ifFalse: [ ^ self ].
+	
+	"Daemon mode — set by smalltalk-daemon.py via env var"
+	(self getenv: 'SMALLTALK_MCP_DAEMON') = '1' ifTrue: [
+		^ self startDaemon ].
+	
+	"Original MCP mode — set by --mcp command line flag"
 	args := Smalltalk arguments.
 	(args includes: '--mcp') ifTrue: [
 		self startServer ].! !
 
-!MCPServer class methodsFor: 'version' stamp: 'jmm 1/25/2026 18:20'!
+!MCPServer class methodsFor: 'version' stamp: 'jmm 1/30/2026 03:45'!
 version
 	"Return the MCP server version number.
 	 Increment when making changes that external tools should detect.
 	 Version history:
 	   1 - Initial version
-	   2 - Fixed toolDefineMethod: to use compileSilently: for headless operation"
-	^ 2! !
+	   2 - Fixed toolDefineMethod: to use compileSilently: for headless operation
+	   3 - JMM-515: OSProcess session refresh fix for MCP stdin/stdout
+	   4 - JMM-512: Dev mode with save_image and save_as_new_version tools
+	   5 - JMM-515: Daemon mode via startUp: (no --doit needed)
+	   6 - JMM-515: Fix getenv: for Squeak (Cuis-only method)
+	   7 - JMM-509: Class-side method support in browse and method-source"
+	^ 7! !
 
-!MCPServer class methodsFor: 'instance creation' stamp: 'Claude 1/21/2026 12:00'!
+!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/30/2026 03:45'!
 startServer
 	"Start the MCP server in a background process.
-	Redirects changes file to /dev/null to allow multiple MCP instances
-	without conflicting writes to the same .changes file."
-
-	"Disable changes file to avoid conflicts with multiple MCP sessions"
-	SourceFiles at: 2 put: (FileStream fileNamed: '/dev/null').
+	In playground mode: Redirects changes file to /dev/null for safety.
+	In dev mode (SMALLTALK_DEV_MODE=1): Keeps changes file for persistence."
+	
+	| devMode |
+	
+	"CRITICAL: Refresh OSProcess handles for new VM session (JMM-515).
+	 After image save/restore, OSProcess session ID becomes stale,
+	 causing stdin/stdout to report as closed. This refresh reattaches
+	 the file handles to the current VM session."
+	OSProcess thisOSProcess refreshFromProcessAccessor.
+	
+	devMode := (self getenv: 'SMALLTALK_DEV_MODE') = '1'.
+	
+	devMode 
+		ifTrue: [
+			"Dev mode - keep changes file for persistence"
+			Transcript show: 'MCP Server starting in DEVELOPMENT mode (changes enabled)'; cr ]
+		ifFalse: [
+			"Playground mode - disable changes file for safety"
+			SourceFiles at: 2 put: (FileStream fileNamed: '/dev/null').
+			Transcript show: 'MCP Server starting in PLAYGROUND mode (changes disabled)'; cr ].
 
 	[
 		"Brief delay to let system stabilize"
 		(Delay forMilliseconds: 100) wait.
 		self new run
 	] forkAt: Processor userBackgroundPriority named: 'MCP Server'.! !
+
+!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/30/2026 03:45'!
+startDaemon
+	"Start MCP server for daemon operation.
+	Called from startUp: when SMALLTALK_MCP_DAEMON=1.
+	Runs inline (blocking) at full priority to avoid green thread starvation.
+	
+	Environment variables:
+	  SMALLTALK_MCP_DAEMON=1  - triggers this mode
+	  SMALLTALK_DEV_MODE=1    - keeps .changes file (else /dev/null)
+	  SMALLTALK_CHANGES_PATH  - explicit path for .changes file (dev mode)"
+	
+	| devMode changesPath |
+	
+	"Refresh OSProcess handles for new VM session (JMM-515)"
+	OSProcess thisOSProcess refreshFromProcessAccessor.
+	
+	"Fix working directory to match image location (may differ cross-platform).
+	 FileDirectory default uses the OS working directory, which may not match
+	 the image location after cross-platform transfer."
+	OSProcess thisOSProcess processAccessor chDir: (FileDirectory dirPathFor: Smalltalk imageName).
+	
+	devMode := (self getenv: 'SMALLTALK_DEV_MODE') = '1'.
+	
+	devMode 
+		ifTrue: [
+			changesPath := self getenv: 'SMALLTALK_CHANGES_PATH'.
+			(changesPath notNil and: [ changesPath notEmpty ])
+				ifTrue: [ SourceFiles at: 2 put: (FileStream oldFileOrNoneNamed: changesPath) ].
+			Transcript show: 'MCP Daemon starting in DEVELOPMENT mode'; cr ]
+		ifFalse: [
+			SourceFiles at: 2 put: (FileStream fileNamed: '/dev/null').
+			Transcript show: 'MCP Daemon starting in PLAYGROUND mode'; cr ].
+	
+	"Run inline — blocks this process, which is fine since we're in startUp:
+	 and don't want Morphic/wakeUpTopWindow to run anyway"
+	self new run.! !
+
+!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/30/2026 03:45'!
+startServerInline
+	"Start the MCP server inline (no fork).
+	Used by the daemon's --doit to run the server at full priority,
+	avoiding green thread starvation under xvfb-run.
+	Performs the same setup as startServer but runs synchronously."
+	
+	| devMode |
+	
+	devMode := (self getenv: 'SMALLTALK_DEV_MODE') = '1'.
+	
+	devMode 
+		ifTrue: [
+			Transcript show: 'MCP Server starting INLINE in DEVELOPMENT mode (changes enabled)'; cr ]
+		ifFalse: [
+			SourceFiles at: 2 put: (FileStream fileNamed: '/dev/null').
+			Transcript show: 'MCP Server starting INLINE in PLAYGROUND mode (changes disabled)'; cr ].
+
+	self new run.! !
+
+!MCPServer class methodsFor: 'saving' stamp: 'jmm 1/29/2026 21:10'!
+headlessSaveAsNewVersion
+	"Save image/changes as next version number, headlessly.
+	Based on SmalltalkImage>>saveAsNewVersion but using headlessSave
+	instead of snapshot:andQuit: to avoid UI hangs."
+	
+	| baseName dotIndex newName newChanges |
+	
+	baseName := FileDirectory baseNameFor: 
+		(FileDirectory default localNameFor: Smalltalk imageName).
+	dotIndex := baseName lastIndexOf: FileDirectory dot asCharacter
+		ifAbsent: [ nil ].
+	(dotIndex notNil and: [ (baseName copyFrom: dotIndex + 1 to: baseName size) isAllDigits ])
+		ifTrue: [ baseName := baseName copyFrom: 1 to: dotIndex - 1 ].
+	
+	newName := FileDirectory default nextNameFor: baseName 
+		extension: FileDirectory imageSuffix.
+	newChanges := Smalltalk fullNameForChangesNamed: newName.
+	
+	(FileDirectory default fileOrDirectoryExists: newChanges)
+		ifTrue: [ self error: 'Changes file already exists: ', newChanges ].
+	
+	"Close current sources, copy changes, reopen with new name"
+	(SourceFiles at: 2) ifNotNil: [
+		Smalltalk closeSourceFiles.
+		Smalltalk saveChangesInFileNamed: (Smalltalk fullNameForChangesNamed: newName) ].
+	
+	"Rename image to new version and save"
+	Smalltalk changeImageNameTo: 
+		(FileDirectory default fullNameFor: (Smalltalk fullNameForImageNamed: newName)).
+	Smalltalk openSourceFiles.
+	
+	self headlessSave.! !
+
+!MCPServer class methodsFor: 'saving' stamp: 'jmm 1/29/2026 21:00'!
+headlessSave
+	"Save the image without Cursor/Morphic operations.
+	Based on SmalltalkImage>>snapshot:andQuit:withExitCode:embedded: but
+	stripped of UI entanglements that hang under xvfb-run:
+	  - No Cursor write/normal show
+	  - No Project current wakeUpTopWindow
+	  - No processShutDownList (we are not quitting)
+	  - No startUpPostSnapshot (we are not resuming from snapshot)
+	Changes file logging IS preserved for traceability."
+	
+	| changesLog result |
+	
+	"Flush weak references"
+	Object flushDependents.
+	Object flushEvents.
+	
+	"Log to changes file"
+	(SourceFiles at: 2) ifNotNil: [ :changesFile |
+		changesLog := String streamContents: [ :s |
+			s nextPutAll: '----SNAPSHOT----';
+			  print: Date dateAndTimeNow;
+			  space;
+			  nextPutAll: (FileDirectory default localNameFor: Smalltalk imageName);
+			  nextPutAll: ' priorSource: ';
+			  print: Smalltalk lastQuitLogPosition ].
+		Smalltalk assureStartupStampLogged.
+		Smalltalk lastQuitLogPosition: (SourceFiles at: 2) setToEnd position.
+		Smalltalk logChange: changesLog.
+		Transcript cr; show: changesLog ].
+	
+	"Save"
+	result := Smalltalk snapshotPrimitive.
+	
+	result ifNil: [ self error: 'Failed to write image file (disk full?)' ].
+	
+	"After save, result is false (continuing from save point).
+	 If image is later restored, result would be true (resuming)."
+	^ result! !
 
 "After filing in, run:
   Installer squeakMap install: 'OSProcess'.

@@ -6,12 +6,17 @@ Keeps a Squeak VM running and accepts JSON-RPC requests via Unix socket.
 This allows state to persist across tool calls.
 
 Usage:
-    smalltalk-daemon.py start       # Start daemon (foreground)
-    smalltalk-daemon.py stop        # Stop running daemon
-    smalltalk-daemon.py status      # Check if daemon is running
-    smalltalk-daemon.py restart     # Restart daemon
+    smalltalk-daemon.py start                          # Playground mode (default)
+    smalltalk-daemon.py start --dev --image PATH       # Dev mode with custom image
+    smalltalk-daemon.py stop                           # Stop running daemon
+    smalltalk-daemon.py status                         # Check if daemon is running
+    smalltalk-daemon.py restart [--dev --image PATH]   # Restart daemon
 
-The daemon listens on /tmp/smalltalk-daemon.sock
+Modes:
+    Playground: Stock image, .changes → /dev/null, ephemeral.
+    Dev:        Supplied image/changes, .changes kept, work persists.
+
+The daemon listens on /tmp/smalltalk-daemon-$USER.sock
 
 Author: John M McIntosh / Simba
 """
@@ -28,9 +33,11 @@ import threading
 import time
 from typing import Optional
 
-SOCKET_PATH = "/tmp/smalltalk-daemon.sock"
-PID_FILE = "/tmp/smalltalk-daemon.pid"
-LOCK_FILE = "/tmp/smalltalk-daemon.lock"
+# User-isolated paths to support multiple users on the same machine
+USER = os.environ.get("USER", "unknown")
+SOCKET_PATH = f"/tmp/smalltalk-daemon-{USER}.sock"
+PID_FILE = f"/tmp/smalltalk-daemon-{USER}.pid"
+LOCK_FILE = f"/tmp/smalltalk-daemon-{USER}.lock"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
@@ -70,9 +77,10 @@ def get_paths():
 class SmalltalkDaemon:
     """Daemon that keeps Squeak VM running and handles requests via Unix socket."""
 
-    def __init__(self, vm_path: str, image_path: str):
+    def __init__(self, vm_path: str, image_path: str, dev_mode: bool = False):
         self.vm_path = vm_path
         self.image_path = image_path
+        self.dev_mode = dev_mode
         self.process: Optional[subprocess.Popen] = None
         self.socket: Optional[socket.socket] = None
         self.running = False
@@ -91,11 +99,25 @@ class SmalltalkDaemon:
         if self.process is not None and self.process.poll() is None:
             return True
 
-        print(f"🚀 Starting Squeak VM...")
+        mode_label = "DEV" if self.dev_mode else "PLAYGROUND"
+        print(f"🚀 Starting Squeak VM ({mode_label} mode)...")
         print(f"   VM: {self.vm_path}")
         print(f"   Image: {self.image_path}")
 
-        cmd = ["xvfb-run", "-a", self.vm_path, self.image_path, "--mcp"]
+        # JMM-515: Start MCP via startUp: mechanism (not --doit).
+        # MCPServer startUp: checks SMALLTALK_MCP_DAEMON env var and runs
+        # inline during processStartUpList: — before Morphic blocks under xvfb.
+        # No --doit needed; all setup is driven by env vars.
+        cmd = [
+            "xvfb-run", "-a", self.vm_path, self.image_path,
+        ]
+
+        env = os.environ.copy()
+        env["SMALLTALK_MCP_DAEMON"] = "1"
+        if self.dev_mode:
+            env["SMALLTALK_DEV_MODE"] = "1"
+            changes_path = self.image_path.replace(".image", ".changes")
+            env["SMALLTALK_CHANGES_PATH"] = changes_path
 
         try:
             self.process = subprocess.Popen(
@@ -106,6 +128,7 @@ class SmalltalkDaemon:
                 text=True,
                 bufsize=1,
                 start_new_session=True,
+                env=env,
             )
 
             # Initialize MCP connection
@@ -152,6 +175,8 @@ class SmalltalkDaemon:
                 print("   ⚠️  Old image detected, applying hotfixes...")
                 self._hotfix_define_method()
                 print("   ✅ Hotfixes applied")
+            
+            # Save tools + daemon mode baked into image v5+ (JMM-512, JMM-515)
                 
         except Exception as e:
             print(f"   ⚠️  Could not check/apply hotfixes: {e}")
@@ -432,8 +457,40 @@ def get_daemon_pid() -> Optional[int]:
         return None
 
 
-def cmd_start():
+def parse_start_args(args: list) -> tuple:
+    """Parse start/restart args for --dev and --image.
+    Returns (dev_mode: bool, image_path: str or None).
+    """
+    dev_mode = "--dev" in args
+    image_path = None
+    if "--image" in args:
+        idx = args.index("--image")
+        if idx + 1 < len(args):
+            image_path = os.path.expanduser(args[idx + 1])
+            if not os.path.exists(image_path):
+                print(f"❌ Image not found: {image_path}")
+                sys.exit(1)
+            # Check for matching .changes file
+            changes_path = image_path.replace(".image", ".changes")
+            if not os.path.exists(changes_path):
+                print(f"❌ Changes file not found: {changes_path}")
+                sys.exit(1)
+        else:
+            print("❌ --image requires a path argument")
+            sys.exit(1)
+
+    if dev_mode and not image_path:
+        print("❌ Dev mode requires --image PATH")
+        sys.exit(1)
+
+    return dev_mode, image_path
+
+
+def cmd_start(args: list = None):
     """Start the daemon."""
+    args = args or []
+    dev_mode, custom_image = parse_start_args(args)
+
     # Use file locking to prevent race condition between checking
     # if daemon is running and starting a new one
     lock_fd = None
@@ -459,14 +516,18 @@ def cmd_start():
             if lock_fd is not None:
                 os.close(lock_fd)
             sys.exit(1)
-        if not image_path or not os.path.exists(image_path):
+
+        # Use custom image if provided (dev mode), otherwise auto-detected
+        if custom_image:
+            image_path = custom_image
+        elif not image_path or not os.path.exists(image_path):
             print("❌ Image not found. Set SQUEAK_IMAGE_PATH or run smalltalk.py --check")
             # Release lock before exiting
             if lock_fd is not None:
                 os.close(lock_fd)
             sys.exit(1)
 
-        daemon = SmalltalkDaemon(vm_path, image_path)
+        daemon = SmalltalkDaemon(vm_path, image_path, dev_mode=dev_mode)
         
         # Initialize daemon (VM, socket, PID file) while holding lock
         if not daemon.initialize():
@@ -542,13 +603,13 @@ def cmd_status():
         sys.exit(1)
 
 
-def cmd_restart():
+def cmd_restart(args: list = None):
     """Restart the daemon."""
     pid = get_daemon_pid()
     if pid:
         cmd_stop()
         time.sleep(0.5)
-    cmd_start()
+    cmd_start(args)
 
 
 def main():
@@ -557,17 +618,18 @@ def main():
         sys.exit(1)
 
     cmd = sys.argv[1]
+    extra_args = sys.argv[2:]
     if cmd == "start":
-        cmd_start()
+        cmd_start(extra_args)
     elif cmd == "stop":
         cmd_stop()
     elif cmd == "status":
         cmd_status()
     elif cmd == "restart":
-        cmd_restart()
+        cmd_restart(extra_args)
     else:
         print(f"Unknown command: {cmd}")
-        print("Usage: smalltalk-daemon.py <start|stop|status|restart>")
+        print("Usage: smalltalk-daemon.py <start|stop|status|restart> [--dev --image PATH]")
         sys.exit(1)
 
 
