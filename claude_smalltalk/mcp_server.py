@@ -160,7 +160,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="smalltalk_method_source",
-            description="Get the source code of a specific method.",
+            description="Retrieve the source code of a specific method. Supports class-side methods via the side parameter.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -171,6 +171,11 @@ async def list_tools() -> list[Tool]:
                     "selector": {
                         "type": "string",
                         "description": "Method selector (e.g., 'at:put:')"
+                    },
+                    "side": {
+                        "type": "string",
+                        "enum": ["instance", "class"],
+                        "description": "Which side of the class to look up (default: instance)"
                     }
                 },
                 "required": ["className", "selector"]

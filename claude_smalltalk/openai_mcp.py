@@ -37,7 +37,10 @@ from typing import Optional
 
 from openai import OpenAI
 
-from openai_tools import OPENAI_TOOLS, FUNCTION_TO_MCP_TOOL
+try:
+    from .openai_tools import OPENAI_TOOLS, FUNCTION_TO_MCP_TOOL
+except ImportError:
+    from openai_tools import OPENAI_TOOLS, FUNCTION_TO_MCP_TOOL
 
 
 class MCPConnection:
