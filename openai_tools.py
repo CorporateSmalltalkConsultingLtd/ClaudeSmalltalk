@@ -49,17 +49,22 @@ OPENAI_TOOLS = [
         "type": "function",
         "function": {
             "name": "smalltalk_method_source",
-            "description": "Get the source code of a specific method.",
+            "description": "Get the source code of a specific method. Supports class-side methods via the side parameter or 'ClassName class' syntax in className.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "className": {
                         "type": "string",
-                        "description": "Name of the class"
+                        "description": "Name of the class (use 'ClassName class' for class-side methods)"
                     },
                     "selector": {
                         "type": "string",
                         "description": "Method selector"
+                    },
+                    "side": {
+                        "type": "string",
+                        "enum": ["instance", "class"],
+                        "description": "Which side of the class to look up (default: instance)"
                     }
                 },
                 "required": ["className", "selector"]

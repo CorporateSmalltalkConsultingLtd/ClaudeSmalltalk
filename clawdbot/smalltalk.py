@@ -28,10 +28,13 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-DAEMON_SOCKET = "/tmp/smalltalk-daemon.sock"
+# User-isolated socket path to support multiple users on the same machine
+USER = os.environ.get("USER", "unknown")
+DAEMON_SOCKET = f"/tmp/smalltalk-daemon-{USER}.sock"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
@@ -86,6 +89,45 @@ def daemon_available() -> bool:
             response = sock.recv(4096)
             return b'"status": "ok"' in response
     except Exception:
+        return False
+
+
+def start_daemon() -> bool:
+    """Start the daemon on-demand. Returns True if daemon is running after call."""
+    if daemon_available():
+        return True
+    
+    # Find the daemon script (same directory as this script)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    daemon_script = os.path.join(script_dir, "smalltalk-daemon.py")
+    
+    if not os.path.exists(daemon_script):
+        print(f"❌ Daemon script not found: {daemon_script}", file=sys.stderr)
+        return False
+    
+    print("🚀 Starting Smalltalk daemon...", file=sys.stderr)
+    
+    # Start daemon in background using nohup to survive parent exit
+    try:
+        subprocess.Popen(
+            ["nohup", sys.executable, daemon_script, "start"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        
+        # Wait for daemon to become available (up to 30 seconds)
+        for i in range(60):
+            time.sleep(0.5)
+            if daemon_available():
+                print("✅ Daemon started", file=sys.stderr)
+                return True
+        
+        print("❌ Daemon failed to start within timeout", file=sys.stderr)
+        return False
+        
+    except Exception as e:
+        print(f"❌ Failed to start daemon: {e}", file=sys.stderr)
         return False
 
 
@@ -184,35 +226,43 @@ def check_setup() -> bool:
             print(f"⚠️  No .sources file in image directory")
             print(f"   May cause dialog popups - symlink SqueakV60.sources to {image_dir}/")
 
-    # Check MCPServer version (quick exec test)
+    # Check MCPServer version
     if all_ok and vm_path and image_path:
         print()
         print("🔍 Checking MCPServer version...")
         try:
-            result = subprocess.run(
-                ["xvfb-run", "-a", vm_path, image_path, "--mcp"],
-                input='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smalltalk_evaluate","arguments":{"code":"MCPServer version"}}}\n',
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            # Parse response to get version
-            for line in result.stdout.strip().split('\n'):
-                if '"result"' in line:
-                    try:
-                        resp = json.loads(line)
-                        content = resp.get("result", {}).get("content", [])
-                        if content:
-                            version_str = content[0].get("text", "0")
-                            version = int(version_str)
-                            if version >= 2:
-                                print(f"✅ MCPServer version: {version}")
-                            else:
-                                print(f"⚠️  MCPServer version: {version} (recommend >= 2 for headless define-method)")
-                                print("   Update image with: FileStream fileIn: 'MCP-Server-Squeak.st'")
-                            break
-                    except (json.JSONDecodeError, ValueError, KeyError) as e:
-                        print(f"⚠️  Failed to parse MCPServer version from line: {line!r} ({e})")
+            # Use daemon if running (avoids spawning second VM)
+            if daemon_available():
+                version_str = call_daemon("smalltalk_evaluate", {"code": "MCPServer version"})
+            else:
+                # No daemon running - spawn a quick VM to check
+                result = subprocess.run(
+                    ["xvfb-run", "-a", vm_path, image_path, "--mcp"],
+                    input='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smalltalk_evaluate","arguments":{"code":"MCPServer version"}}}\n',
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                # Parse response to get version
+                version_str = "0"
+                for line in result.stdout.strip().split('\n'):
+                    if '"result"' in line:
+                        try:
+                            resp = json.loads(line)
+                            content = resp.get("result", {}).get("content", [])
+                            if content:
+                                version_str = content[0].get("text", "0")
+                                break
+                        except (json.JSONDecodeError, ValueError, KeyError):
+                            pass
+            
+            version = int(version_str)
+            if version >= 2:
+                print(f"✅ MCPServer version: {version}")
+            else:
+                print(f"⚠️  MCPServer version: {version} (recommend >= 2 for headless define-method)")
+                print("   Update image with: FileStream fileIn: 'MCP-Server-Squeak.st'")
+                
         except subprocess.TimeoutExpired:
             print("⚠️  MCPServer version check timed out")
         except Exception as e:
@@ -494,38 +544,195 @@ def print_usage():
     print("  subclasses <className>       - Get subclasses")
     print("  list-categories              - List categories")
     print("  classes-in-category <cat>    - List classes in category")
+    print("\nLLM-powered tools (require OPENAI_API_KEY):")
+    print("  explain <code>               - Explain Smalltalk code")
+    print("  explain-method <class> <sel>  - Explain a method from the live image")
+    print("  audit-comment <class> <sel>   - Audit method comment vs implementation")
+    print("  audit-class <className>       - Audit all comments in a class")
+    print("\nOptions for explain/explain-method:")
+    print("  --detail=brief|detailed|step-by-step  (default: brief)")
+    print("  --audience=beginner|experienced        (default: experienced)")
     print("\nModes:")
     print("  If smalltalk-daemon is running, uses fast persistent mode.")
     print("  Otherwise falls back to exec mode (fresh VM per call).")
     print("\nEnvironment:")
     print("  SQUEAK_VM_PATH     - Path to VM (auto-detected if not set)")
     print("  SQUEAK_IMAGE_PATH  - Path to image (auto-detected if not set)")
+    print("  OPENAI_API_KEY     - Required for explain/audit tools")
+    print("  OPENAI_MODEL       - Model for LLM tools (default: gpt-4o-mini)")
+
+
+def llm_query(prompt: str, system: str = "") -> str:
+    """Query an LLM via OpenAI-compatible API. Uses OPENAI_API_KEY env var.
+    Falls back gracefully if no API key is available."""
+    import urllib.request
+    import urllib.error
+
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        return "Error: No OPENAI_API_KEY set. LLM-powered tools require an API key."
+
+    base_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    body = json.dumps({
+        "model": model,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_tokens": 2048,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            return data["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        return f"Error: LLM API returned {e.code}: {e.read().decode()[:200]}"
+    except Exception as e:
+        return f"Error: LLM query failed: {e}"
+
+
+def tool_explain(code: str, detail: str = "brief", audience: str = "experienced") -> str:
+    """Explain Smalltalk code in plain English (JMM-510)."""
+    system = "You are a Smalltalk expert. Explain code clearly and accurately."
+
+    if audience == "beginner":
+        audience_note = "The reader is new to Smalltalk. Explain idioms and patterns."
+    else:
+        audience_note = "The reader knows Smalltalk. Be concise."
+
+    if detail == "step-by-step":
+        style = "Explain step-by-step, numbering each step."
+    elif detail == "detailed":
+        style = "Give a thorough explanation including design intent and edge cases."
+    else:
+        style = "Give a brief one-paragraph explanation."
+
+    prompt = f"""{style}
+{audience_note}
+
+Smalltalk code:
+```smalltalk
+{code}
+```"""
+
+    return llm_query(prompt, system)
+
+
+def tool_explain_method(class_name: str, selector: str,
+                        detail: str = "brief", audience: str = "experienced",
+                        side: str = "instance") -> str:
+    """Fetch a method from the live image and explain it (JMM-510 variant).
+    side='class' fetches from the class side."""
+    params = {"className": class_name, "selector": selector}
+    if side == "class":
+        params["side"] = "class"
+    source = run_tool("smalltalk_method_source", params)
+    if isinstance(source, str) and source.startswith("Error:"):
+        return source
+
+    display_name = f"{class_name} class" if side == "class" else class_name
+    return tool_explain(f"Method: {display_name}>>{selector}\n\n{source}", detail, audience)
+
+
+def tool_audit_comment(class_name: str, selector: str, side: str = "instance") -> str:
+    """Audit a method's comment against its implementation (JMM-511).
+    side='class' audits a class-side method."""
+    params = {"className": class_name, "selector": selector}
+    if side == "class":
+        params["side"] = "class"
+    source = run_tool("smalltalk_method_source", params)
+    if isinstance(source, str) and source.startswith("Error:"):
+        return source
+
+    display_name = f"{class_name} class" if side == "class" else class_name
+    system = "You are a Smalltalk expert performing a code comment audit. Always refer to methods using Smalltalk convention: ClassName>>selector for instance side, ClassName class>>selector for class side."
+    prompt = f"""Analyze the Smalltalk method {display_name}>>{selector}. Compare the comment (if any) against what the code actually does.
+
+Start your response with: **{display_name}>>{selector}**
+
+Then report one of:
+- **MATCH** — Comment accurately describes the code
+- **DRIFT** — Comment is outdated or misleading (explain the discrepancy)
+- **MISSING** — No comment exists
+
+If DRIFT or MISSING, suggest an accurate comment.
+
+```smalltalk
+{source}
+```"""
+
+    return llm_query(prompt, system)
+
+
+def tool_audit_class(class_name: str) -> str:
+    """Audit all methods in a class for comment accuracy (JMM-511 variant).
+    Audits both instance-side and class-side methods."""
+    browse_result = run_tool("smalltalk_browse", {"className": class_name})
+    if isinstance(browse_result, str) and browse_result.startswith("Error:"):
+        return browse_result
+
+    # Parse the browse result to get method selectors
+    instance_selectors = []
+    class_selectors = []
+    try:
+        browse_data = json.loads(browse_result)
+        if isinstance(browse_data, dict):
+            instance_selectors = browse_data.get("methods", [])
+            class_selectors = browse_data.get("classMethods", [])
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    if not instance_selectors and not class_selectors:
+        return f"Error: Could not extract method selectors from {class_name}"
+
+    results = []
+
+    # Instance side
+    if instance_selectors:
+        results.append(f"## Instance Side ({len(instance_selectors)} methods)\n")
+        for sel in instance_selectors:
+            result = tool_audit_comment(class_name, sel, side="instance")
+            results.append(f"### {class_name}>>{sel}\n{result}")
+
+    # Class side
+    if class_selectors:
+        results.append(f"\n## Class Side ({len(class_selectors)} methods)\n")
+        for sel in class_selectors:
+            result = tool_audit_comment(class_name, sel, side="class")
+            results.append(f"### {class_name} class>>{sel}\n{result}")
+
+    total = len(instance_selectors) + len(class_selectors)
+    header = f"# Comment Audit: {class_name} ({total} methods — {len(instance_selectors)} instance, {len(class_selectors)} class)\n\n"
+    return header + "\n\n".join(results)
 
 
 def run_tool(tool_name: str, arguments: dict) -> str:
-    """Run a tool - uses daemon if available, otherwise exec mode."""
-    # Try daemon first
-    if daemon_available():
-        try:
-            return call_daemon(tool_name, arguments)
-        except Exception as e:
-            print(f"⚠️  Daemon error, falling back to exec mode: {e}", file=sys.stderr)
-
-    # Fallback to exec mode
-    vm_path, image_path = get_paths()
-
-    if not vm_path or not os.path.exists(vm_path):
-        return "Error: VM not found. Run 'smalltalk.py --check' for setup help"
-
-    if not image_path or not os.path.exists(image_path):
-        return "Error: Image not found. Run 'smalltalk.py --check' for setup help"
-
-    client = MCPClient(vm_path, image_path)
+    """Run a tool - starts daemon on-demand if not running."""
+    # Start daemon if not available (lazy start)
+    if not daemon_available():
+        if not start_daemon():
+            return "Error: Failed to start Smalltalk daemon. Run 'smalltalk.py --check' for setup help"
+    
+    # Use daemon
     try:
-        client.start()
-        return client.call_tool(tool_name, arguments)
-    finally:
-        client.stop()
+        return call_daemon(tool_name, arguments)
+    except Exception as e:
+        return f"Error: Daemon call failed: {e}"
 
 
 def main():
@@ -571,12 +778,15 @@ def main():
 
         elif command == "method-source":
             if len(sys.argv) < 4:
-                print("Usage: smalltalk.py method-source <className> <selector>")
+                print("Usage: smalltalk.py method-source <className> <selector> [--class-side]")
+                print("       smalltalk.py method-source 'ClassName class' <selector>")
                 sys.exit(1)
-            result = run_tool("smalltalk_method_source", {
-                "className": sys.argv[2],
-                "selector": sys.argv[3]
-            })
+            class_name = sys.argv[2]
+            selector = sys.argv[3]
+            params = {"className": class_name, "selector": selector}
+            if "--class-side" in sys.argv[4:]:
+                params["side"] = "class"
+            result = run_tool("smalltalk_method_source", params)
 
         elif command == "define-class":
             if len(sys.argv) < 3:
@@ -638,6 +848,61 @@ def main():
             result = run_tool("smalltalk_classes_in_category", {
                 "category": sys.argv[2]
             })
+
+        elif command == "explain":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py explain <code> [--detail=brief] [--audience=experienced]")
+                sys.exit(1)
+            # Parse optional flags
+            detail, audience = "brief", "experienced"
+            code_parts = []
+            for arg in sys.argv[2:]:
+                if arg.startswith("--detail="):
+                    detail = arg.split("=", 1)[1]
+                elif arg.startswith("--audience="):
+                    audience = arg.split("=", 1)[1]
+                else:
+                    code_parts.append(arg)
+            result = tool_explain(" ".join(code_parts), detail, audience)
+
+        elif command == "explain-method":
+            if len(sys.argv) < 4:
+                print("Usage: smalltalk.py explain-method <className> <selector> [--detail=brief] [--audience=experienced]")
+                sys.exit(1)
+            class_name = sys.argv[2]
+            selector = sys.argv[3]
+            detail, audience, side = "brief", "experienced", "instance"
+            for arg in sys.argv[4:]:
+                if arg.startswith("--detail="):
+                    detail = arg.split("=", 1)[1]
+                elif arg.startswith("--audience="):
+                    audience = arg.split("=", 1)[1]
+                elif arg == "--class-side":
+                    side = "class"
+            # Also support "ClassName class" syntax
+            if class_name.endswith(" class"):
+                class_name = class_name[:-6]
+                side = "class"
+            result = tool_explain_method(class_name, selector, detail, audience, side)
+
+        elif command == "audit-comment":
+            if len(sys.argv) < 4:
+                print("Usage: smalltalk.py audit-comment <className> <selector> [--class-side]")
+                sys.exit(1)
+            class_name = sys.argv[2]
+            selector = sys.argv[3]
+            side = "class" if "--class-side" in sys.argv[4:] else "instance"
+            # Also support "ClassName class" syntax
+            if class_name.endswith(" class"):
+                class_name = class_name[:-6]
+                side = "class"
+            result = tool_audit_comment(class_name, selector, side)
+
+        elif command == "audit-class":
+            if len(sys.argv) < 3:
+                print("Usage: smalltalk.py audit-class <className>")
+                sys.exit(1)
+            result = tool_audit_class(sys.argv[2])
 
         else:
             print(f"Unknown command: {command}")
