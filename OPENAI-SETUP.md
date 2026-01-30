@@ -15,7 +15,7 @@ The Python bridge:
 
 ## Prerequisites
 
-1. **Python 3.8+** (OpenAI SDK requirement)
+1. **Python 3.10+** (required for type hints and MCP SDK)
 2. **OpenAI API Key** - Get one from https://platform.openai.com/api-keys
 3. **Squeak 6.0** with MCP server - See SQUEAK-SETUP.md
 
