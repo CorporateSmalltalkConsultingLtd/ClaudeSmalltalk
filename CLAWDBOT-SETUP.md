@@ -76,11 +76,38 @@ export SQUEAK_IMAGE_PATH=~/ClaudeSqueak.image
 
 Add to `~/.bashrc` or `~/.profile` to persist.
 
-## Step 7: Verify Setup
+## Step 7: Configure LLM API Key (Optional)
+
+The `explain`, `explain-method`, `audit-comment`, and `audit-class` commands use an LLM. Set one of these API keys:
+
+```bash
+# Option A: Anthropic Claude (preferred — fast and cost-effective)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Option B: OpenAI (fallback)
+export OPENAI_API_KEY="sk-..."
+```
+
+When both keys are set, Anthropic is used by default. Override with `LLM_PROVIDER`:
+
+```bash
+export LLM_PROVIDER=openai   # Force OpenAI even if ANTHROPIC_API_KEY is set
+```
+
+Optional model overrides:
+
+```bash
+export ANTHROPIC_MODEL=claude-sonnet-4-20250514   # Default: claude-opus-4-20250514
+export OPENAI_MODEL=gpt-4o                        # Default: gpt-4o
+```
+
+## Step 8: Verify Setup
 
 ```bash
 python3 ~/clawd/skills/smalltalk/clawdbot/smalltalk.py --check
 ```
+
+(If you skipped Step 7, the LLM-powered tools won't work but all Smalltalk MCP tools will.)
 
 Expected output:
 ```
@@ -101,7 +128,7 @@ Expected output:
 
 **Note:** MCPServer version 7+ is required. If you see an older version, update your image by filing in the latest `MCP-Server-Squeak.st`.
 
-## Step 8: Test
+## Step 9: Test
 
 ```bash
 python3 ~/clawd/skills/smalltalk/clawdbot/smalltalk.py evaluate "3 factorial"
@@ -217,7 +244,7 @@ Once set up, ask Clawdbot things like:
 
 ### LLM-Powered CLI Tools (JMM-510/JMM-511)
 
-The skill includes LLM-powered analysis tools that require `OPENAI_API_KEY`:
+The skill includes LLM-powered analysis tools that require `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (Anthropic preferred when both set):
 
 ```bash
 # Explain a method (instance or class side)

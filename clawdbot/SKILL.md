@@ -131,10 +131,11 @@ python3 smalltalk-daemon.py restart --dev --image ~/MyProject.image
 | `subclasses <class>` | Get immediate subclasses |
 | `list-categories` | List all system categories |
 | `classes-in-category <cat>` | List classes in a category |
-| `explain <code>` | Explain Smalltalk code (requires `OPENAI_API_KEY`) |
-| `explain-method <class> <sel> [--class-side]` | Fetch method from image and explain it |
-| `audit-comment <class> <sel> [--class-side]` | Audit method comment vs implementation |
+| `explain <code>` | Explain Smalltalk code (requires `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) |
+| `explain-method <class> <sel> [--class-side] [--source <code>]` | Fetch method from image and explain it (or use `--source`/`--source-file`/`--source-stdin` to bypass daemon) |
+| `audit-comment <class> <sel> [--class-side] [--source <code>]` | Audit method comment vs implementation (or use `--source`/`--source-file`/`--source-stdin` to bypass daemon) |
 | `audit-class <class>` | Audit all methods in a class (instance + class side) |
+| `generate-sunit <targets> [--force] [--class-name <name>]` | Generate SUnit tests for methods and file into image |
 
 ## Environment Variables
 
@@ -142,8 +143,57 @@ python3 smalltalk-daemon.py restart --dev --image ~/MyProject.image
 |----------|-------------|
 | `SQUEAK_VM_PATH` | Path to Squeak/Cuis VM executable |
 | `SQUEAK_IMAGE_PATH` | Path to Smalltalk image with MCP server |
-| `OPENAI_API_KEY` | Required for explain/audit LLM tools |
-| `OPENAI_MODEL` | Model for LLM tools (default: `gpt-4o-mini`) |
+| `ANTHROPIC_API_KEY` | API key for Anthropic Claude (preferred for LLM tools) |
+| `ANTHROPIC_MODEL` | Anthropic model (default: `claude-opus-4-20250514`) |
+| `OPENAI_API_KEY` | API key for OpenAI (fallback for LLM tools) |
+| `OPENAI_MODEL` | OpenAI model (default: `gpt-4o`) |
+| `LLM_PROVIDER` | Force LLM provider: `anthropic` or `openai` (auto-detected if not set) |
+
+## Using with Claude Code (MCP mode)
+
+When Claude Code has a live Smalltalk image connected via MCP, `explain-method` and `audit-comment` can use pre-fetched source code instead of requiring a running daemon. Use `--source`, `--source-file`, or `--source-stdin` to pass the method source directly:
+
+```bash
+# Inline source (fetched via MCP, passed on command line)
+python3 smalltalk.py explain-method SmallInteger + --source "+ aNumber <primitive: 1> ^ super + aNumber"
+
+# Source from a file
+python3 smalltalk.py audit-comment Integer factorial --source-file /tmp/factorial.st
+
+# Source piped via stdin
+echo "printString ^ self printStringLimitedTo: 50000" | python3 smalltalk.py explain-method Object printString --source-stdin
+```
+
+The three source flags are mutually exclusive. When none is provided, the daemon is used as before.
+
+## Generating SUnit Tests
+
+The `generate-sunit` command uses an LLM to generate SUnit test cases for Smalltalk methods and files them directly into the running image:
+
+```bash
+# Generate tests for a single method
+python3 smalltalk.py generate-sunit "String>>asUppercase"
+
+# Generate tests for multiple methods
+python3 smalltalk.py generate-sunit "Random>>next" "Random>>nextInt:" "Random>>seed:"
+
+# Generate tests for an entire class (all instance methods)
+python3 smalltalk.py generate-sunit "OrderedCollection"
+
+# Generate tests for class-side methods
+python3 smalltalk.py generate-sunit "Date class>>today"
+
+# Custom test class name
+python3 smalltalk.py generate-sunit "String>>asUppercase" --class-name MyStringTests
+
+# Overwrite existing test class
+python3 smalltalk.py generate-sunit "String>>asUppercase" --force
+
+# Run the generated tests
+python3 smalltalk.py evaluate "StringGeneratedTest buildSuite run printString"
+```
+
+The generated TestCase uses standard SUnit assertions (`assert:`, `assert:equals:`, `deny:`, `should:raise:`) and is filed into a `GeneratedSUnit-*` category.
 
 ## Notes
 

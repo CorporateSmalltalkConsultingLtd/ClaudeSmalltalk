@@ -25,6 +25,7 @@ import fcntl
 import glob
 import json
 import os
+import select
 import signal
 import socket
 import subprocess
@@ -255,8 +256,8 @@ class SmalltalkDaemon:
             print(f"❌ MCP init exception: {e}")
             return False
 
-    def _send_to_vm(self, method: str, params: Optional[dict] = None) -> dict:
-        """Send JSON-RPC request to VM and get response."""
+    def _send_to_vm(self, method: str, params: Optional[dict] = None, timeout: float = 30.0) -> dict:
+        """Send JSON-RPC request to VM and get response with timeout."""
         if self.process is None or self.process.poll() is not None:
             return {"error": {"message": "VM not running"}}
 
@@ -272,8 +273,21 @@ class SmalltalkDaemon:
             self.process.stdin.write(json.dumps(request) + "\n")
             self.process.stdin.flush()
 
-            # Read response, skipping non-JSON lines
+            # Read response with timeout, skipping non-JSON lines
+            deadline = time.time() + timeout
             while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return {"error": {"message": f"VM response timeout after {timeout}s"}}
+                
+                # Use select to wait for data with timeout
+                ready, _, _ = select.select([self.process.stdout], [], [], min(remaining, 1.0))
+                if not ready:
+                    # Check if VM died while waiting
+                    if self.process.poll() is not None:
+                        return {"error": {"message": "VM died while waiting for response"}}
+                    continue
+                
                 response_line = self.process.stdout.readline()
                 if not response_line:
                     return {"error": {"message": "No response from VM"}}
@@ -374,9 +388,14 @@ class SmalltalkDaemon:
         old_umask = os.umask(0o177)
         try:
             self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.socket.bind(SOCKET_PATH)
-            self.socket.listen(5)
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.socket.bind(SOCKET_PATH)
+                self.socket.listen(5)
+            except Exception:
+                self.socket.close()
+                self.socket = None
+                raise
         finally:
             os.umask(old_umask)
 
