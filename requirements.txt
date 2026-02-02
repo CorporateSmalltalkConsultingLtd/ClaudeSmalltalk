@@ -1,6 +1,6 @@
 # Python dependencies for ClaudeSmalltalk
 #
-# Option D (OpenAI Bridge) - works with Python 3.8+
+# Option D (OpenAI Bridge) - requires Python 3.10+
 openai>=1.0.0
 
 # Option A (Python/MQTT Bridge) - requires Python 3.10+
