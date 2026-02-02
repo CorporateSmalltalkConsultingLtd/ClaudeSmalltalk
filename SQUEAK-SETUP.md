@@ -40,7 +40,7 @@ Replace `'YourInitials'` with your actual initials (e.g., `'JM'` for John McCart
 
 OSProcess is required for stdio access with responsive GUI support.
 
-### Option A: Via Monticello Browser (GUI)
+### Via Monticello Browser (GUI)
 
 1. Open **World menu → open → Monticello Browser**
 2. Click **+Repository → HTTP**
@@ -49,7 +49,6 @@ OSProcess is required for stdio access with responsive GUI support.
 5. Select the repository in the left pane
 6. Find the latest version (e.g., `OSProcess-dtl.xxx.mcz`)
 7. Click **Load**
-
 
 ### Verify OSProcess Installation
 
@@ -82,22 +81,36 @@ In a Workspace, evaluate (Cmd+D / Ctrl+D to do it):
 Smalltalk addToStartUpList: MCPServer.
 ```
 
-This ensures the MCP server starts automatically when the image launches with the `--mcp` flag.
+This registers MCPServer in the startup list. On image launch, `MCPServer startUp:` checks for:
+- **`--mcp` flag**: Original Claude Code MCP mode (forked background process)
+- **`SMALLTALK_MCP_DAEMON=1` env var**: Daemon mode (inline, blocking — used by Clawdbot)
 
-## Step 7: Save the Image
+## Step 7: Verify
+
+In a Workspace, evaluate (Cmd+P to print):
+
+```smalltalk
+MCPServer version.    "Should return 7"
+```
+
+```smalltalk
+MCPServer class canUnderstand: #startDaemon.   "Should return true"
+```
+
+## Step 8: Save the Image
 
 Save the image with a descriptive name:
 
 1. **World menu → save as...**
-2. Enter name: `ClaudeSqueak6.0` (or similar)
+2. Enter name: `ClaudeSqueak`
 3. Click **Accept**
 
 The image will be saved in the same directory as the original image, typically:
 ```
-Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak6.0.image
+Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image
 ```
 
-## Step 8: Configure Claude Code
+## Step 9: Configure Claude Code
 
 Add the MCP server configuration to your Claude Code settings.
 
@@ -110,7 +123,7 @@ You need two paths:
 Example paths on macOS:
 ```
 VM: /path/to/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak
-Image: /path/to/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak6.0.image
+Image: /path/to/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image
 ```
 
 ### Add MCP Server Configuration
@@ -124,7 +137,7 @@ Edit your Claude Code project settings (`.claude/settings.local.json`) or global
       "type": "stdio",
       "command": "/path/to/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
       "args": [
-        "/path/to/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak6.0.image",
+        "/path/to/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image",
         "--mcp"
       ]
     }
@@ -134,7 +147,7 @@ Edit your Claude Code project settings (`.claude/settings.local.json`) or global
 
 **Important**: Replace `/path/to/` with your actual paths. Paths with spaces must be quoted properly in JSON.
 
-## Step 9: Test the Connection
+## Step 10: Test the Connection
 
 1. Start Claude Code in your project directory
 2. Run `/mcp` to check MCP server status
@@ -144,6 +157,28 @@ Ask Claude: "Evaluate `3 + 4` in Smalltalk"
 
 You should get the result `7` and the Squeak GUI should remain responsive.
 
+## Troubleshooting
+
+### MCP Server Not Starting
+
+- Verify the image path and VM path are correct
+- Check that `--mcp` is in the args array
+- Ensure MCPServer is in the startup list:
+  ```smalltalk
+  Smalltalk startUpList includes: MCPServer  "Should be true"
+  ```
+
+### GUI Freezes
+
+If the GUI becomes unresponsive, verify that `BufferedAsyncFileReadStream` is being used. Check in a Workspace before saving:
+
+```smalltalk
+MCPTransport new stdin class  "Should be BufferedAsyncFileReadStream"
+```
+
+### OSProcess Not Found
+
+If you get errors about OSProcess, the package didn't install correctly. Try reinstalling via Monticello Browser.
 
 ### Connection Refused
 
@@ -153,25 +188,48 @@ You should get the result `7` and the Squeak GUI should remain responsive.
 
 ## Architecture
 
+The MCP server supports two modes of operation:
+
+### Claude Code Mode (`--mcp`)
+
 ```
-Claude Code ←─stdio/JSON-RPC─→ Squeak VM
+Claude Code ←─stdio/JSON-RPC─→ Squeak VM (forked background process)
                                   │
                                   ├─ MCPTransport (BufferedAsyncFileReadStream)
-                                  └─ MCPServer (12 tools)
+                                  └─ MCPServer (14 tools)
 ```
+
+### Daemon Mode (`SMALLTALK_MCP_DAEMON=1`)
+
+```
+Clawdbot ←─Unix socket─→ smalltalk-daemon.py ←─stdio─→ Squeak VM (inline)
+                                                          │
+                                                          ├─ MCPTransport
+                                                          └─ MCPServer (14 tools)
+```
+
+Daemon mode runs the MCP server inline during `processStartUpList:`, before Morphic's `wakeUpTopWindow` — critical for headless operation under `xvfb-run`.
 
 The MCP server uses `BufferedAsyncFileReadStream` which provides:
 - Non-blocking stdin via AIO (Async I/O) plugin
 - Semaphore-based waiting that allows GUI to remain responsive
 - Server-side processing: 0-3ms per request
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `SMALLTALK_MCP_DAEMON` | Set to `1` to enable daemon mode (used by `smalltalk-daemon.py`) |
+| `SMALLTALK_DEV_MODE` | Set to `1` to enable dev mode (changes file preserved, save tools active) |
+| `SMALLTALK_CHANGES_PATH` | Path for the changes file in dev mode |
+
 ## Available MCP Tools
 
 | Tool | Description |
 |------|-------------|
 | `smalltalk_evaluate` | Execute Smalltalk code and return result |
-| `smalltalk_browse` | Get class metadata |
-| `smalltalk_method_source` | View method source code |
+| `smalltalk_browse` | Get class metadata (includes both instance `methods` and `classMethods`) |
+| `smalltalk_method_source` | View method source code (supports `side` param for class-side methods) |
 | `smalltalk_define_class` | Create or modify a class |
 | `smalltalk_define_method` | Add or update a method |
 | `smalltalk_delete_method` | Remove a method |
@@ -181,6 +239,10 @@ The MCP server uses `BufferedAsyncFileReadStream` which provides:
 | `smalltalk_subclasses` | Get direct subclasses |
 | `smalltalk_list_categories` | List system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
+| `smalltalk_save_image` | Save the current image in place (dev mode only) |
+| `smalltalk_save_as_new_version` | Save image/changes as next version number (dev mode only) |
+
+**Note:** `smalltalk_save_image` and `smalltalk_save_as_new_version` are only available when `SMALLTALK_DEV_MODE=1`. In playground mode (default), changes are not persisted and the changes file is redirected to `/dev/null`.
 
 ## Updating the MCP Server
 
@@ -190,8 +252,14 @@ To update to a newer version of `MCP-Server-Squeak.st`:
 2. Save the image
 3. Restart Claude Code or run `/mcp` to reconnect
 
+Check the version after updating:
+```smalltalk
+MCPServer version   "Current: 7"
+```
+
 ## Security Notes
 
 - The MCP server can execute arbitrary Smalltalk code
-- `saveImage` is intentionally NOT exposed via MCP to prevent accidental corruption
-- Save your image manually from the Squeak GUI when needed
+- `saveImage` and `saveAsNewVersion` are only available in dev mode (`SMALLTALK_DEV_MODE=1`)
+- In playground mode (default), the changes file is redirected to `/dev/null` for safety
+- Save your image manually from the Squeak GUI when not using dev mode
