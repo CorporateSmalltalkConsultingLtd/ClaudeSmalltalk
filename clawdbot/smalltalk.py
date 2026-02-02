@@ -848,8 +848,8 @@ def _fetch_methods_for_target(class_name: str, selector: Optional[str], side: st
         try:
             data = json.loads(browse)
             category = data.get("category", "Unknown")
-        except:
-            pass
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            print(f"Warning: Failed to parse browse result for category: {e}", file=sys.stderr)
         
         return [(display, source, category)]
     
