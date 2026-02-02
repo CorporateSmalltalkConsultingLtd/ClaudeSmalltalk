@@ -28,6 +28,7 @@ Author: Adapted from ClaudeSmalltalk by John M McIntosh
 import glob
 import json
 import os
+import re
 import signal
 import shutil
 import socket
@@ -1005,12 +1006,10 @@ Generate a complete TestCase subclass with comprehensive tests."""
     
     # Clean up any markdown if LLM included it
     if "```smalltalk" in generated_code:
-        import re
         match = re.search(r'```smalltalk\s*(.*?)\s*```', generated_code, re.DOTALL)
         if match:
             generated_code = match.group(1)
     elif "```" in generated_code:
-        import re
         match = re.search(r'```\s*(.*?)\s*```', generated_code, re.DOTALL)
         if match:
             generated_code = match.group(1)
