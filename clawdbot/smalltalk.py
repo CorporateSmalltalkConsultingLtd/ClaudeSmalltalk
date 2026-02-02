@@ -1088,8 +1088,22 @@ def _resolve_source_from_args(args: list[str]) -> Tuple[Optional[str], list[str]
             remaining.append(arg)
 
     # Check mutual exclusivity before doing any I/O
-    if len(source_flags_seen) > 1:
-        print(f"Error: --source, --source-file, and --source-stdin are mutually exclusive (got {', '.join(source_flags_seen)})", file=sys.stderr)
+    unique_flags = list(dict.fromkeys(source_flags_seen))
+    if len(unique_flags) > 1:
+        # Multiple different source flag types were provided
+        print(
+            "Error: --source, --source-file, and --source-stdin are mutually exclusive "
+            f"(got {', '.join(unique_flags)})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    elif len(source_flags_seen) > 1:
+        # Same source flag was provided multiple times
+        print(
+            f"Error: {source_flags_seen[0]} was provided multiple times; "
+            "please specify at most one source option",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if not source_flags_seen:
