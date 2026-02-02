@@ -551,7 +551,7 @@ def print_usage():
     print("\nOptions for explain/explain-method:")
     print("  --detail=brief|detailed|step-by-step  (default: brief)")
     print("  --audience=beginner|experienced        (default: experienced)")
-    print("\nSource override (explain-method, audit-comment, generate-sunit — bypasses daemon):")
+    print("\nSource override (explain-method, audit-comment — bypasses daemon):")
     print("  --source <code>        - Pass method source inline")
     print("  --source-file <path>   - Read method source from a file")
     print("  --source-stdin         - Read method source from stdin")
