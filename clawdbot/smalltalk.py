@@ -16,11 +16,13 @@ Usage:
 Environment Variables:
     SQUEAK_VM_PATH      - Path to Squeak/Cuis VM executable
     SQUEAK_IMAGE_PATH   - Path to Smalltalk image with MCP server
-    LLM_PROVIDER        - Force LLM provider: "anthropic" or "openai" (auto-detected if not set)
-    ANTHROPIC_API_KEY   - API key for Anthropic Claude (preferred when both keys set)
-    ANTHROPIC_MODEL     - Anthropic model (default: claude-opus-4-20250514)
+    LLM_PROVIDER        - Force LLM provider: "xai", "anthropic", or "openai" (auto-detected if not set)
+    XAI_API_KEY         - API key for xAI Grok (preferred when multiple keys set)
+    XAI_MODEL           - xAI model (default: grok-4-1-fast-reasoning)
+    ANTHROPIC_API_KEY   - API key for Anthropic Claude
+    ANTHROPIC_MODEL     - Anthropic model (default: claude-opus-4-6)
     OPENAI_API_KEY      - API key for OpenAI
-    OPENAI_MODEL        - OpenAI model (default: gpt-4o)
+    OPENAI_MODEL        - OpenAI model (default: gpt-5.1-codex-max)
 
 Author: Adapted from ClaudeSmalltalk by John M McIntosh
 """
@@ -543,7 +545,7 @@ def print_usage():
     print("  subclasses <className>       - Get subclasses")
     print("  list-categories              - List categories")
     print("  classes-in-category <cat>    - List classes in category")
-    print("\nLLM-powered tools (require ANTHROPIC_API_KEY or OPENAI_API_KEY):")
+    print("\nLLM-powered tools (require XAI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY):")
     print("  explain <code>               - Explain Smalltalk code")
     print("  explain-method <class> <sel>  - Explain a method from the live image")
     print("  audit-comment <class> <sel>   - Audit method comment vs implementation")
@@ -565,25 +567,33 @@ def print_usage():
     print("\nEnvironment:")
     print("  SQUEAK_VM_PATH     - Path to VM (auto-detected if not set)")
     print("  SQUEAK_IMAGE_PATH  - Path to image (auto-detected if not set)")
-    print("  ANTHROPIC_API_KEY  - API key for Anthropic Claude (preferred)")
-    print("  ANTHROPIC_MODEL    - Anthropic model (default: claude-opus-4-20250514)")
+    print("  XAI_API_KEY        - API key for xAI Grok (preferred)")
+    print("  XAI_MODEL          - xAI model (default: grok-4-1-fast-reasoning)")
+    print("  ANTHROPIC_API_KEY  - API key for Anthropic Claude")
+    print("  ANTHROPIC_MODEL    - Anthropic model (default: claude-opus-4-6)")
     print("  OPENAI_API_KEY     - API key for OpenAI (fallback)")
-    print("  OPENAI_MODEL       - OpenAI model (default: gpt-4o)")
-    print("  LLM_PROVIDER       - Force provider: 'anthropic' or 'openai'")
+    print("  OPENAI_MODEL       - OpenAI model (default: gpt-5.1-codex-max)")
+    print("  LLM_PROVIDER       - Force provider: 'xai', 'anthropic', or 'openai'")
 
 
 def _detect_llm_provider() -> Tuple[str, str]:
     """Detect which LLM provider to use.
-    Returns (provider, api_key) tuple. Provider is 'anthropic' or 'openai'.
+    Returns (provider, api_key) tuple. Provider is 'xai', 'anthropic', or 'openai'.
+    Priority: xAI (Grok) → Anthropic (Claude) → OpenAI.
     Returns ('', '') if no provider is available."""
     override = os.environ.get("LLM_PROVIDER", "").lower()
+    xai_key = os.environ.get("XAI_API_KEY", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
 
+    if override == "xai":
+        return ("xai", xai_key) if xai_key else ("", "")
     if override == "anthropic":
         return ("anthropic", anthropic_key) if anthropic_key else ("", "")
     if override == "openai":
         return ("openai", openai_key) if openai_key else ("", "")
+    if xai_key:
+        return ("xai", xai_key)
     if anthropic_key:
         return ("anthropic", anthropic_key)
     if openai_key:
@@ -591,48 +601,12 @@ def _detect_llm_provider() -> Tuple[str, str]:
     return ("", "")
 
 
-def _llm_query_anthropic(prompt: str, system: str, api_key: str) -> str:
-    """Query Anthropic Claude Messages API."""
+def _llm_query_xai(prompt: str, system: str, api_key: str) -> str:
+    """Query xAI Grok API (OpenAI-compatible)."""
     import urllib.request
     import urllib.error
 
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-20250514")
-
-    body = json.dumps({
-        "model": model,
-        "max_tokens": 2048,
-        "temperature": 0.3,
-        "system": system or "You are a helpful assistant.",
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
-
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        },
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-            return data["content"][0]["text"]
-    except urllib.error.HTTPError as e:
-        return f"Error: Anthropic API returned {e.code}: {e.read().decode()[:200]}"
-    except Exception as e:
-        return f"Error: Anthropic query failed: {e}"
-
-
-def _llm_query_openai(prompt: str, system: str, api_key: str) -> str:
-    """Query OpenAI-compatible chat completions API."""
-    import urllib.request
-    import urllib.error
-
-    base_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o")
+    model = os.environ.get("XAI_MODEL", "grok-4-1-fast-reasoning")
 
     messages = []
     if system:
@@ -647,11 +621,12 @@ def _llm_query_openai(prompt: str, system: str, api_key: str) -> str:
     }).encode()
 
     req = urllib.request.Request(
-        f"{base_url}/chat/completions",
+        "https://api.x.ai/v1/chat/completions",
         data=body,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "ClaudeSmalltalk/1.0",
         },
     )
 
@@ -660,17 +635,135 @@ def _llm_query_openai(prompt: str, system: str, api_key: str) -> str:
             data = json.loads(resp.read())
             return data["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
-        return f"Error: LLM API returned {e.code}: {e.read().decode()[:200]}"
+        return f"Error: xAI API returned {e.code}: {e.read().decode()[:200]}"
     except Exception as e:
-        return f"Error: LLM query failed: {e}"
+        return f"Error: xAI query failed: {e}"
+
+
+def _llm_query_anthropic(prompt: str, system: str, api_key: str) -> str:
+    """Query Anthropic Claude Messages API."""
+    import urllib.request
+    import urllib.error
+
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-6")
+
+    body = json.dumps({
+        "model": model,
+        "max_tokens": 2048,
+        "temperature": 0.3,
+        "system": system or "You are a helpful assistant.",
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode()
+
+    headers = {
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "User-Agent": "ClaudeSmalltalk/1.0",
+    }
+    if api_key.startswith("sk-ant-oat"):
+        headers["Authorization"] = f"Bearer {api_key}"
+    else:
+        headers["x-api-key"] = api_key
+
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers=headers,
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            return data["content"][0]["text"]
+    except urllib.error.HTTPError as e:
+        return f"Error: Anthropic API returned {e.code}: {e.read().decode()[:200]}"
+    except Exception as e:
+        return f"Error: Anthropic query failed: {e}"
+
+
+def _llm_query_openai(prompt: str, system: str, api_key: str) -> str:
+    """Query OpenAI API. Uses Responses API for codex models, Chat Completions for others."""
+    import urllib.request
+    import urllib.error
+
+    base_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
+    model = os.environ.get("OPENAI_MODEL", "gpt-5.1-codex-max")
+
+    use_responses = "codex" in model.lower()
+
+    if use_responses:
+        # Responses API for codex models
+        input_text = f"{system}\n\n{prompt}" if system else prompt
+        body = json.dumps({
+            "model": model,
+            "input": input_text,
+        }).encode()
+
+        req = urllib.request.Request(
+            f"{base_url}/responses",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            "User-Agent": "ClaudeSmalltalk/1.0",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+                for item in data.get("output", []):
+                    if item.get("type") == "message":
+                        for content in item.get("content", []):
+                            if content.get("type") == "output_text":
+                                return content["text"]
+                return "Error: No text output in Responses API result"
+        except urllib.error.HTTPError as e:
+            return f"Error: OpenAI Responses API returned {e.code}: {e.read().decode()[:200]}"
+        except Exception as e:
+            return f"Error: OpenAI query failed: {e}"
+    else:
+        # Chat Completions API for standard models
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        body = json.dumps({
+            "model": model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 2048,
+        }).encode()
+
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            "User-Agent": "ClaudeSmalltalk/1.0",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                return data["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            return f"Error: LLM API returned {e.code}: {e.read().decode()[:200]}"
+        except Exception as e:
+            return f"Error: LLM query failed: {e}"
 
 
 def llm_query(prompt: str, system: str = "") -> str:
-    """Query an LLM. Auto-detects provider from API keys; prefers Anthropic when both set.
+    """Query an LLM. Auto-detects provider from API keys; prefers xAI > Anthropic > OpenAI.
     Override with LLM_PROVIDER env var."""
     provider, api_key = _detect_llm_provider()
     if not provider:
-        return "Error: No ANTHROPIC_API_KEY or OPENAI_API_KEY set. LLM-powered tools require an API key."
+        return "Error: No XAI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY set. LLM-powered tools require an API key."
+    if provider == "xai":
+        return _llm_query_xai(prompt, system, api_key)
     if provider == "anthropic":
         return _llm_query_anthropic(prompt, system, api_key)
     return _llm_query_openai(prompt, system, api_key)

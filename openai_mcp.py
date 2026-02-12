@@ -2,7 +2,7 @@
 """
 OpenAI Bridge for Squeak MCP Server
 
-Requires Python 3.8+ and the openai package.
+Requires Python 3.10+ and the openai package.
 
 This script connects OpenAI's ChatGPT API to the Squeak MCP server,
 allowing ChatGPT to execute Smalltalk code via the same 12 MCP tools
@@ -381,7 +381,7 @@ def main() -> None:
         print("\nSet OPENAI_API_KEY environment variable to your OpenAI API key.", file=sys.stderr)
         sys.exit(1)
 
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o")
+    model = os.environ.get("OPENAI_MODEL", "gpt-5.1-codex-max")
 
     # Default paths for Squeak VM and image
     default_vm = "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak"
