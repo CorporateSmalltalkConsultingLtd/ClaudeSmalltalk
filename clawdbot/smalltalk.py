@@ -655,15 +655,20 @@ def _llm_query_anthropic(prompt: str, system: str, api_key: str) -> str:
         "messages": [{"role": "user", "content": prompt}],
     }).encode()
 
+    headers = {
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "User-Agent": "ClaudeSmalltalk/1.0",
+    }
+    if api_key.startswith("sk-ant-oat"):
+        headers["Authorization"] = f"Bearer {api_key}"
+    else:
+        headers["x-api-key"] = api_key
+
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
         data=body,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-            "User-Agent": "ClaudeSmalltalk/1.0",
-        },
+        headers=headers,
     )
 
     try:
