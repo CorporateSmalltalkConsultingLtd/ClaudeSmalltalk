@@ -28,7 +28,7 @@ Claude Code config (~/.claude.json):
     }
   }
 '!
-!provides: 'MCP-Server' 1 11!
+!provides: 'MCP-Server' 1 12!
 !requires: 'JSON' nil nil nil!
 !requires: 'OSProcess' nil nil nil!
 SystemOrganization addCategory: #'MCP-Server'!
@@ -952,13 +952,21 @@ version
 	   8 - Remove debug logging that blocked UI startup
 	   9 - Simplify MCPTransport initialize
 	   10 - Add extensive logging to debug UI startup hang
-	   11 - Remove debug logging, use correct Cuis author API"
-	^ 11! !
+	   11 - Remove debug logging, use correct Cuis author API
+	   12 - Enable source recording in dev mode (SMALLTALK_DEV_MODE=1)"
+	^ 12! !
 
 !MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/26/2026 11:00'!
 startServer
-	"Start MCP server in background process, allowing GUI to initialize normally"
-	SourceFiles at: 2 put: nil.  "Disable changes file for MCP mode"
+	"Start MCP server in background process, allowing GUI to initialize normally.
+	 In dev mode (SMALLTALK_DEV_MODE=1): opens changes file for source recording.
+	 In playground mode (default): changes file remains nil, no source recording."
+	| devMode changesName |
+	devMode := (OSProcess thisOSProcess environmentAt: 'SMALLTALK_DEV_MODE') = '1'.
+	devMode ifTrue: [
+		changesName := (OSProcess thisOSProcess environmentAt: 'SMALLTALK_CHANGES_PATH')
+			ifNil: [ Smalltalk imageName copyReplaceAll: '.image' with: '.changes' ].
+		SourceFiles at: 2 put: (UniFileStream new open: changesName forWrite: true) ].
 	Utilities setAuthorName: 'ClaudeSmalltalk' initials: 'LLM'.
 	[
 		(Delay forMilliseconds: 500) wait.
