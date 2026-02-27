@@ -1,6 +1,5 @@
 ---
 name: smalltalk
-version: 1.7.0
 description: Interact with live Smalltalk image (Cuis or Squeak). Use for evaluating Smalltalk code, browsing classes, viewing method source, defining classes/methods, querying hierarchy and categories.
 metadata: {"clawdbot":{"emoji":"💎","requires":{"bins":["python3","xvfb-run"]}}}
 ---
@@ -195,6 +194,8 @@ python3 smalltalk.py evaluate "StringGeneratedTest buildSuite run printString"
 ```
 
 The generated TestCase uses standard SUnit assertions (`assert:`, `assert:equals:`, `deny:`, `should:raise:`) and is filed into a `GeneratedSUnit-*` category.
+
+---
 
 ## Notes
 

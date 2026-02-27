@@ -105,12 +105,13 @@ class SmalltalkDaemon:
         print(f"   VM: {self.vm_path}")
         print(f"   Image: {self.image_path}")
 
-        # JMM-515: Start MCP via startUp: mechanism (not --doit).
-        # MCPServer startUp: checks SMALLTALK_MCP_DAEMON env var and runs
-        # inline during processStartUpList: — before Morphic blocks under xvfb.
-        # No --doit needed; all setup is driven by env vars.
+        # JMM-515/JMM-619: Start MCP via startUp: mechanism.
+        # MCPServer startUp: checks SMALLTALK_MCP_DAEMON env var first (daemon mode),
+        # then falls back to --mcp CLI flag (background mode).
+        # Both Squeak and Cuis images now support the env var (JMM-619).
+        # The --mcp flag is also passed for backward compatibility with older images.
         cmd = [
-            "xvfb-run", "-a", self.vm_path, self.image_path,
+            "xvfb-run", "-a", self.vm_path, self.image_path, "--mcp",
         ]
 
         env = os.environ.copy()
