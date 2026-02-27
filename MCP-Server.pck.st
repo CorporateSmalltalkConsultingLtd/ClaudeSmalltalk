@@ -930,14 +930,27 @@ toolSubclasses: arg1
 		argm3_5 name ]) asArray sorted.
 	^ Json render: temp4.! !
 
-!MCPServer class methodsFor: 'system startup' stamp: 'jmm 1/26/2026 11:00'!
+!MCPServer class methodsFor: 'system startup' stamp: 'jmm 2/20/2026 00:50'!
 startUp: resuming
+	"Called on image startup. Two modes:
+	 1. SMALLTALK_MCP_DAEMON=1 env var: Daemon mode (inline, blocking)
+	 2. --mcp flag: Original MCP mode (forked, background)
+	 
+	 Daemon mode runs inline during processStartUpList: which fires BEFORE
+	 the Morphic world loop starts — critical for headless operation under
+	 xvfb-run where the daemon controls stdin/stdout."
 	| args |
 	resuming ifFalse: [ ^ self ].
+	
+	"Daemon mode — set by smalltalk-daemon.py via env var"
+	(Smalltalk getenv: 'SMALLTALK_MCP_DAEMON') = '1' ifTrue: [
+		^ self startDaemon ].
+	
+	"Original MCP mode — set by --mcp command line flag"
 	args := Smalltalk startUpArguments.
 	(args includes: '--mcp') ifTrue: [ self startServer ].! !
 
-!MCPServer class methodsFor: 'version' stamp: 'jmm 1/26/2026 11:00'!
+!MCPServer class methodsFor: 'version' stamp: 'jmm 2/20/2026 00:50'!
 version
 	"Return the MCP server version number.
 	 Increment when making changes that external tools should detect.
@@ -952,8 +965,40 @@ version
 	   8 - Remove debug logging that blocked UI startup
 	   9 - Simplify MCPTransport initialize
 	   10 - Add extensive logging to debug UI startup hang
-	   11 - Remove debug logging, use correct Cuis author API"
-	^ 11! !
+	   11 - Remove debug logging, use correct Cuis author API
+	   12 - JMM-619: Add daemon mode (SMALLTALK_MCP_DAEMON env var) for smalltalk-daemon.py"
+	^ 12! !
+
+!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 2/20/2026 00:50'!
+startDaemon
+	"Start MCP server for daemon operation (JMM-619).
+	Called from startUp: when SMALLTALK_MCP_DAEMON=1.
+	Runs inline (blocking) — no fork, no delay.
+	
+	This is critical for smalltalk-daemon.py which communicates over
+	subprocess stdin/stdout pipes. Running inline ensures MCP responds
+	immediately without waiting for Morphic initialization.
+	
+	Environment variables:
+	  SMALLTALK_MCP_DAEMON=1  - triggers this mode
+	  SMALLTALK_DEV_MODE=1    - keeps .changes file (else disabled)"
+	
+	| devMode |
+	
+	devMode := (Smalltalk getenv: 'SMALLTALK_DEV_MODE') = '1'.
+	
+	devMode
+		ifTrue: [
+			Transcript show: 'MCP Daemon starting in DEVELOPMENT mode'; newLine ]
+		ifFalse: [
+			SourceFiles at: 2 put: nil.
+			Transcript show: 'MCP Daemon starting in PLAYGROUND mode'; newLine ].
+	
+	Utilities setAuthorName: 'ClaudeSmalltalk' initials: 'LLM'.
+	
+	"Run inline — blocks this process, which is fine since we are in startUp:
+	 and do not want the Morphic world loop to run before MCP is ready"
+	self new run.! !
 
 !MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/26/2026 11:00'!
 startServer
