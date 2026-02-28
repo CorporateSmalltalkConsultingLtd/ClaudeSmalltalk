@@ -37,7 +37,7 @@ SystemOrganization addCategory: #'MCP-Server'!
 !classDefinition: #MCPServer category: #'MCP-Server'!
 Object subclass: #MCPServer
 	instanceVariableNames: 'transport running'
-	classVariableNames: ''
+	classVariableNames: 'RunningInstance'
 	poolDictionaries: ''
 	category: 'MCP-Server'!
 !classDefinition: 'MCPServer class' category: #'MCP-Server'!
@@ -62,7 +62,9 @@ initialize
 
 !MCPServer methodsFor: 'running' stamp: 'jmm 1/26/2026 11:00'!
 run
+	"Main server loop - read requests, dispatch, write responses"
 	| request response |
+	RunningInstance := self.
 	running := true.
 	[ running ] whileTrue: [
 		request := transport readMessage.
@@ -74,93 +76,100 @@ run
 
 !MCPServer methodsFor: 'running' stamp: ''!
 stop
-	running := false.! !
+	running := false.
+	RunningInstance := nil.! !
 
 !MCPServer methodsFor: 'request handling' stamp: ''!
-dispatch: arg1 params: arg2
-	arg1 = 'initialize' ifTrue: [ ^ self handleInitialize: arg2 ].
-	arg1 = 'tools/list' ifTrue: [ ^ self handleToolsList: arg2 ].
-	arg1 = 'tools/call' ifTrue: [ ^ self handleToolsCall: arg2 ].
-	arg1 = 'ping' ifTrue: [ ^ Dictionary new ].
-	self error: 'Unknown method: ' , arg1.! !
+dispatch: method params: params
+	"Dispatch JSON-RPC method to handler"
+	method = 'initialize' ifTrue: [ ^ self handleInitialize: params ].
+	method = 'tools/list' ifTrue: [ ^ self handleToolsList: params ].
+	method = 'tools/call' ifTrue: [ ^ self handleToolsCall: params ].
+	method = 'ping' ifTrue: [ ^ Dictionary new ].
+	self error: 'Unknown method: ' , method.! !
 
 !MCPServer methodsFor: 'request handling' stamp: ''!
-handleNotification: arg1 params: arg2
-	arg1 = 'notifications/initialized' ifTrue: [ ^ self ].
-	arg1 = 'notifications/cancelled' ifTrue: [ ^ self ].! !
+handleNotification: method params: params
+	"Handle JSON-RPC notifications (no response expected)"
+	method = 'notifications/initialized' ifTrue: [ ^ self ].
+	method = 'notifications/cancelled' ifTrue: [ ^ self ].! !
 
 !MCPServer methodsFor: 'request handling' stamp: ''!
-handleRequest: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+handleRequest: request
+	"Handle a JSON-RPC request, return response or nil for notifications"
+	| method id result |
+	method := request
 		at: 'method'
 		ifAbsent: [ ^ nil ].
-	temp3 := arg1
+	id := request
 		at: 'id'
 		ifAbsent: [ ].
-	temp3 ifNil: [
+	id ifNil: [
 		self
-			handleNotification: temp2
+			handleNotification: method
 			params:
-				(arg1
+				(request
 					at: 'params'
 					ifAbsent: [ Dictionary new ]).
 		^ nil ].
 	[
-	temp4 := self
-		dispatch: temp2
+	result := self
+		dispatch: method
 		params:
-			(arg1
+			(request
 				at: 'params'
 				ifAbsent: [ Dictionary new ]).
 	^ self
-		successResponse: temp3
-		result: temp4 ]
+		successResponse: id
+		result: result ]
 		on: Error
-		do: [ :argm3_6 |
+		do: [ :ex |
 			^ self
-				errorResponse: temp3
+				errorResponse: id
 				code: -32603
-				message: argm3_6 printString ].! !
+				message: ex printString ].! !
 
 !MCPServer methodsFor: 'responses' stamp: ''!
-errorResponse: arg1 code: arg2 message: arg3
+errorResponse: id code: code message: message
+	"Build a JSON-RPC error response"
 	^ OrderedDictionary new
 		
 			at: 'jsonrpc'
 			put: '2.0';
 		
 			at: 'id'
-			put: arg1;
+			put: id;
 		
 			at: 'error'
 			put:
 				(OrderedDictionary new
 					
 						at: 'code'
-						put: arg2;
+						put: code;
 					
 						at: 'message'
-						put: arg3;
+						put: message;
 					yourself);
 		yourself.! !
 
 !MCPServer methodsFor: 'responses' stamp: ''!
-successResponse: arg1 result: arg2
+successResponse: id result: result
+	"Build a JSON-RPC success response"
 	^ OrderedDictionary new
 		
 			at: 'jsonrpc'
 			put: '2.0';
 		
 			at: 'id'
-			put: arg1;
+			put: id;
 		
 			at: 'result'
-			put: arg2;
+			put: result;
 		yourself.! !
 
 !MCPServer methodsFor: 'MCP handlers' stamp: ''!
-handleInitialize: arg1
+handleInitialize: params
+	"Handle MCP initialize request"
 	^ OrderedDictionary new
 		
 			at: 'protocolVersion'
@@ -187,15 +196,16 @@ handleInitialize: arg1
 		yourself.! !
 
 !MCPServer methodsFor: 'MCP handlers' stamp: ''!
-handleToolsCall: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1 at: 'name'.
-	temp3 := arg1
+handleToolsCall: params
+	"Handle MCP tools/call request"
+	| name arguments resultText |
+	name := params at: 'name'.
+	arguments := params
 		at: 'arguments'
 		ifAbsent: [ Dictionary new ].
-	temp4 := self
-		executeTool: temp2
-		arguments: temp3.
+	resultText := self
+		executeTool: name
+		arguments: arguments.
 	^ OrderedDictionary new
 		
 			at: 'content'
@@ -207,13 +217,14 @@ handleToolsCall: arg1
 							put: 'text';
 						
 							at: 'text'
-							put: temp4;
+							put: resultText;
 						yourself
 				};
 		yourself.! !
 
 !MCPServer methodsFor: 'MCP handlers' stamp: ''!
-handleToolsList: arg1
+handleToolsList: params
+	"Handle MCP tools/list request"
 	^ OrderedDictionary new
 		
 			at: 'tools'
@@ -718,217 +729,276 @@ toolDefinitions
 	^ {self toolDefEvaluate. self toolDefBrowse. self toolDefMethodSource. self toolDefDefineClass. self toolDefDefineMethod. self toolDefDeleteMethod. self toolDefDeleteClass. self toolDefListClasses. self toolDefHierarchy. self toolDefSubclasses. self toolDefListCategories. self toolDefClassesInCategory}.! !
 
 !MCPServer methodsFor: 'tool dispatch' stamp: ''!
-executeTool: arg1 arguments: arg2
-	arg1 = 'smalltalk_evaluate' ifTrue: [ ^ self toolEvaluate: arg2 ].
-	arg1 = 'smalltalk_browse' ifTrue: [ ^ self toolBrowse: arg2 ].
-	arg1 = 'smalltalk_method_source' ifTrue: [ ^ self toolMethodSource: arg2 ].
-	arg1 = 'smalltalk_define_class' ifTrue: [ ^ self toolDefineClass: arg2 ].
-	arg1 = 'smalltalk_define_method' ifTrue: [ ^ self toolDefineMethod: arg2 ].
-	arg1 = 'smalltalk_delete_method' ifTrue: [ ^ self toolDeleteMethod: arg2 ].
-	arg1 = 'smalltalk_delete_class' ifTrue: [ ^ self toolDeleteClass: arg2 ].
-	arg1 = 'smalltalk_list_classes' ifTrue: [ ^ self toolListClasses: arg2 ].
-	arg1 = 'smalltalk_hierarchy' ifTrue: [ ^ self toolHierarchy: arg2 ].
-	arg1 = 'smalltalk_subclasses' ifTrue: [ ^ self toolSubclasses: arg2 ].
-	arg1 = 'smalltalk_list_categories' ifTrue: [ ^ self toolListCategories: arg2 ].
-	arg1 = 'smalltalk_classes_in_category' ifTrue: [ ^ self toolClassesInCategory: arg2 ].
-	arg1 = 'smalltalk_save_image' ifTrue: [ ^ self toolSaveImage: arg2 ].
-	self error: 'Unknown tool: ' , arg1.! !
+executeTool: name arguments: args
+	"Dispatch tool call to implementation"
+	name = 'smalltalk_evaluate' ifTrue: [ ^ self toolEvaluate: args ].
+	name = 'smalltalk_browse' ifTrue: [ ^ self toolBrowse: args ].
+	name = 'smalltalk_method_source' ifTrue: [ ^ self toolMethodSource: args ].
+	name = 'smalltalk_define_class' ifTrue: [ ^ self toolDefineClass: args ].
+	name = 'smalltalk_define_method' ifTrue: [ ^ self toolDefineMethod: args ].
+	name = 'smalltalk_delete_method' ifTrue: [ ^ self toolDeleteMethod: args ].
+	name = 'smalltalk_delete_class' ifTrue: [ ^ self toolDeleteClass: args ].
+	name = 'smalltalk_list_classes' ifTrue: [ ^ self toolListClasses: args ].
+	name = 'smalltalk_hierarchy' ifTrue: [ ^ self toolHierarchy: args ].
+	name = 'smalltalk_subclasses' ifTrue: [ ^ self toolSubclasses: args ].
+	name = 'smalltalk_list_categories' ifTrue: [ ^ self toolListCategories: args ].
+	name = 'smalltalk_classes_in_category' ifTrue: [ ^ self toolClassesInCategory: args ].
+	name = 'smalltalk_save_image' ifTrue: [ ^ self toolSaveImage: args ].
+	self error: 'Unknown tool: ' , name.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolBrowse: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+toolBrowse: args
+	"Browse a class - return metadata as JSON.
+	 Includes both instance-side and class-side methods."
+	| className class result |
+	className := args
 		at: 'className'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No className provided' ].
-	temp3 := Smalltalk
-		at: temp2 asSymbol
-		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
-	temp4 := OrderedDictionary new.
-	temp4
+	className isEmpty ifTrue: [ self error: 'No className provided' ].
+	class := Smalltalk
+		at: className asSymbol
+		ifAbsent: [ self error: 'Class not found: ' , className ].
+	result := OrderedDictionary new.
+	result
 		at: 'name'
-		put: temp3 name.
-	temp4
+		put: class name.
+	result
 		at: 'superclass'
 		put:
-			(temp3 superclass
+			(class superclass
 				ifNil: [ 'nil' ]
-				ifNotNil: [ :temp5 |
-					temp5 name ]).
-	temp4
+				ifNotNil: [ :sc |
+					sc name ]).
+	result
 		at: 'category'
-		put: temp3 category.
-	temp4
+		put: class category.
+	result
 		at: 'instanceVariables'
-		put: temp3 instVarNames asArray.
-	temp4
+		put: class instVarNames asArray.
+	result
 		at: 'classVariables'
-		put: temp3 classVarNames asArray.
-	temp4
+		put: class classVarNames asArray.
+	result
 		at: 'methods'
-		put: temp3 selectors asArray sorted.
-	temp4
+		put: class selectors asArray sorted.
+	result
 		at: 'comment'
-		put: (temp3 comment ifNil: [ '' ]).
-	^ Json render: temp4.! !
+		put: (class comment ifNil: [ '' ]).
+	^ Json render: result.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolClassesInCategory: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+toolClassesInCategory: args
+	"List all classes in a category"
+	| category classes names |
+	category := args
 		at: 'category'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No category provided' ].
-	temp3 := Smalltalk allClasses select: [ :argm2_5 |
-		argm2_5 category = temp2 asSymbol ].
-	temp4 := (temp3 collect: [ :argm3_5 |
-		argm3_5 name ]) asArray sorted.
-	^ Json render: temp4.! !
+	category isEmpty ifTrue: [ self error: 'No category provided' ].
+	classes := Smalltalk allClasses select: [ :c |
+		c category = category asSymbol ].
+	names := (classes collect: [ :c |
+		c name ]) asArray sorted.
+	^ Json render: names.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'jmm 1/26/2026 09:30'!
-toolDefineClass: arg1
-	| temp2 |
-	temp2 := arg1
+toolDefineClass: args
+	"Define a new class"
+	| definition |
+	definition := args
 		at: 'definition'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No definition provided' ].
-	Compiler evaluate: temp2.
+	definition isEmpty ifTrue: [ self error: 'No definition provided' ].
+	Compiler evaluate: definition.
 	^ 'Class defined successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolDefineMethod: arg1
-	| temp2 temp3 temp4 temp5 |
-	temp2 := arg1
+toolDefineMethod: args
+	"Define or modify a method on a class.
+	 Uses compileSilently: to avoid UI dialogs in headless mode."
+	| className source category class |
+	className := args
 		at: 'className'
 		ifAbsent: [ '' ].
-	temp3 := arg1
+	source := args
 		at: 'source'
 		ifAbsent: [ '' ].
-	temp4 := arg1
+	category := args
 		at: 'category'
 		ifAbsent: [ 'as yet unclassified' ].
-	temp2 isEmpty ifTrue: [ self error: 'No className provided' ].
-	temp3 isEmpty ifTrue: [ self error: 'No source provided' ].
-	temp5 := Smalltalk
-		at: temp2 asSymbol
-		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
-	temp5
-		compileSilently: temp3
-		classified: temp4.
+	className isEmpty ifTrue: [ self error: 'No className provided' ].
+	source isEmpty ifTrue: [ self error: 'No source provided' ].
+	class := Smalltalk
+		at: className asSymbol
+		ifAbsent: [ self error: 'Class not found: ' , className ].
+	class
+		compileSilently: source
+		classified: category.
 	^ 'Method defined successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolDeleteClass: arg1
-	| temp2 temp3 |
-	temp2 := arg1
+toolDeleteClass: args
+	"Remove a class from the system"
+	| className class |
+	className := args
 		at: 'className'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No className provided' ].
-	temp3 := Smalltalk
-		at: temp2 asSymbol
-		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
-	temp3 removeFromSystem.
+	className isEmpty ifTrue: [ self error: 'No className provided' ].
+	class := Smalltalk
+		at: className asSymbol
+		ifAbsent: [ self error: 'Class not found: ' , className ].
+	class removeFromSystem.
 	^ 'Class deleted successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolDeleteMethod: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+toolDeleteMethod: args
+	"Remove a method from a class"
+	| className selector class |
+	className := args
 		at: 'className'
 		ifAbsent: [ '' ].
-	temp3 := arg1
+	selector := args
 		at: 'selector'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No className provided' ].
-	temp3 isEmpty ifTrue: [ self error: 'No selector provided' ].
-	temp4 := Smalltalk
-		at: temp2 asSymbol
-		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
-	(temp4 includesSelector: temp3 asSymbol) ifFalse: [ self error: 'Method not found: ' , temp2 , '>>' , temp3 ].
-	temp4 removeSelector: temp3 asSymbol.
+	className isEmpty ifTrue: [ self error: 'No className provided' ].
+	selector isEmpty ifTrue: [ self error: 'No selector provided' ].
+	class := Smalltalk
+		at: className asSymbol
+		ifAbsent: [ self error: 'Class not found: ' , className ].
+	(class includesSelector: selector asSymbol) ifFalse: [ self error: 'Method not found: ' , className , '>>' , selector ].
+	class removeSelector: selector asSymbol.
 	^ 'Method deleted successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolEvaluate: arg1
-	| temp2 temp3 |
-	temp2 := arg1
+toolEvaluate: args
+	"Evaluate Smalltalk code and return result"
+	| code result |
+	code := args
 		at: 'code'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No code provided' ].
-	temp3 := Compiler evaluate: temp2.
-	^ temp3 printString.! !
+	code isEmpty ifTrue: [ self error: 'No code provided' ].
+	result := Compiler evaluate: code.
+	^ result printString.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolHierarchy: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+toolHierarchy: args
+	"Get inheritance hierarchy from Object down to this class"
+	| className class hierarchy |
+	className := args
 		at: 'className'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No className provided' ].
-	temp3 := Smalltalk
-		at: temp2 asSymbol
-		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
-	temp4 := OrderedCollection new.
-	[ temp3 notNil ] whileTrue: [
-		temp4 add: temp3 name.
-		temp3 := temp3 superclass ].
-	^ Json render: temp4 asArray.! !
+	className isEmpty ifTrue: [ self error: 'No className provided' ].
+	class := Smalltalk
+		at: className asSymbol
+		ifAbsent: [ self error: 'Class not found: ' , className ].
+	hierarchy := OrderedCollection new.
+	[ class notNil ] whileTrue: [
+		hierarchy add: class name.
+		class := class superclass ].
+	^ Json render: hierarchy asArray.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolListCategories: arg1
-	| temp2 |
-	temp2 := SystemOrganization categories asArray sorted.
-	^ Json render: temp2.! !
+toolListCategories: args
+	"List all system categories"
+	| categories |
+	categories := SystemOrganization categories asArray sorted.
+	^ Json render: categories.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolListClasses: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+toolListClasses: args
+	"List all classes, optionally filtered by prefix"
+	| prefix classes names |
+	prefix := args
 		at: 'prefix'
 		ifAbsent: [ '' ].
-	temp3 := Smalltalk allClasses.
-	temp2 isEmpty ifFalse: [
-		temp3 := temp3 select: [ :argm2_5 |
-			argm2_5 name asString beginsWith: temp2 ]].
-	temp4 := (temp3 collect: [ :argm3_5 |
-		argm3_5 name ]) asArray sorted.
-	^ Json render: temp4.! !
+	classes := Smalltalk allClasses.
+	prefix isEmpty ifFalse: [
+		classes := classes select: [ :c |
+			c name asString beginsWith: prefix ]].
+	names := (classes collect: [ :c |
+		c name ]) asArray sorted.
+	^ Json render: names.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolMethodSource: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+toolMethodSource: args
+	"Get source code of a method. Supports both instance and class side.
+	 Class side can be requested via side='class' parameter or by appending
+	 ' class' to className (e.g. 'MCPServer class')."
+	| className selector side |
+	className := args
 		at: 'className'
 		ifAbsent: [ '' ].
-	temp3 := arg1
+	selector := args
 		at: 'selector'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No className provided' ].
-	temp3 isEmpty ifTrue: [ self error: 'No selector provided' ].
-	temp4 := Smalltalk
-		at: temp2 asSymbol
-		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
-	(temp4 includesSelector: temp3 asSymbol) ifFalse: [ self error: 'Method not found: ' , temp2 , '>>' , temp3 ].
-	^ (temp4 >> temp3 asSymbol) sourceCode.! !
+	className isEmpty ifTrue: [ self error: 'No className provided' ].
+	selector isEmpty ifTrue: [ self error: 'No selector provided' ].
+	side := Smalltalk
+		at: className asSymbol
+		ifAbsent: [ self error: 'Class not found: ' , className ].
+	(side includesSelector: selector asSymbol) ifFalse: [ self error: 'Method not found: ' , className , '>>' , selector ].
+	^ (side >> selector asSymbol) sourceCode.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolSaveImage: arg1
-	Smalltalk saveImage.
-	^ 'Image saved successfully'.! !
+toolSaveImage: args
+	"Save the current image in place.
+	Uses headlessSave which calls snapshotPrimitive directly,
+	skipping the full shutdown/startup cycle that would restart MCP."
+	self class headlessSave.
+	^ 'Image saved: ' , Smalltalk imageName.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
-toolSubclasses: arg1
-	| temp2 temp3 temp4 |
-	temp2 := arg1
+toolSubclasses: args
+	"Get direct subclasses of a class"
+	| className class names |
+	className := args
 		at: 'className'
 		ifAbsent: [ '' ].
-	temp2 isEmpty ifTrue: [ self error: 'No className provided' ].
-	temp3 := Smalltalk
-		at: temp2 asSymbol
-		ifAbsent: [ self error: 'Class not found: ' , temp2 ].
-	temp4 := (temp3 subclasses collect: [ :argm3_5 |
-		argm3_5 name ]) asArray sorted.
-	^ Json render: temp4.! !
+	className isEmpty ifTrue: [ self error: 'No className provided' ].
+	class := Smalltalk
+		at: className asSymbol
+		ifAbsent: [ self error: 'Class not found: ' , className ].
+	names := (class subclasses collect: [ :c |
+		c name ]) asArray sorted.
+	^ Json render: names.! !
+
+!MCPServer class methodsFor: 'private' stamp: ''!
+envAt: varName
+	"Get environment variable value. Works on both Squeak (getenv:) and Cuis (OSProcess)."
+	(Smalltalk respondsTo: #getenv:) ifTrue: [ ^ Smalltalk getenv: varName ].
+	[ ^ OSProcess accessor environmentAt: varName ]
+		on: Error do: [ :e | ^ nil ].! !
+
+!MCPServer class methodsFor: 'saving' stamp: ''!
+headlessSave
+	"Save the image without the full shutdown/startup cycle.
+	Calls snapshotPrimitive directly, which avoids:
+	  - processShutDownList / processStartUpList (would restart MCP)
+	  - Cursor/Morphic UI operations (would hang under headless/xvfb)
+	Changes file logging IS preserved for traceability.
+	Based on Squeak MCPServer>>headlessSave, ported to Cuis API."
+	
+	| changesLog result |
+	
+	"Log to changes file"
+	(SourceFiles at: 2) ifNotNil: [
+		changesLog := String streamContents: [ :s |
+			s nextPutAll: '----SNAPSHOT----';
+			  nextPutAll: Date today printString;
+			  space;
+			  nextPutAll: Time now printString;
+			  space;
+			  nextPutAll: Smalltalk imageName asFullFileEntry name ].
+		Smalltalk logChange: changesLog.
+		Transcript show: changesLog; newLine ].
+	
+	"Save — calls primitive 97 directly"
+	result := Smalltalk snapshotPrimitive.
+	
+	result ifNil: [ self error: 'Failed to write image file (disk full?)' ].
+	
+	"result is false when continuing from save point.
+	 result is true when image is later restored (resumed)."
+	^ result! !
 
 !MCPServer class methodsFor: 'system startup' stamp: 'jmm 2/20/2026 00:50'!
 startUp: resuming
@@ -938,12 +1008,17 @@ startUp: resuming
 	 
 	 Daemon mode runs inline during processStartUpList: which fires BEFORE
 	 the Morphic world loop starts — critical for headless operation under
-	 xvfb-run where the daemon controls stdin/stdout."
+	 xvfb-run where the daemon controls stdin/stdout.
+	 
+	 Guard: skip if MCP server is already running (resume after save)."
 	| args |
 	resuming ifFalse: [ ^ self ].
 	
+	"Don't restart if already running (e.g. after Smalltalk saveImage)"
+	RunningInstance notNil ifTrue: [ ^ self ].
+	
 	"Daemon mode — set by smalltalk-daemon.py via env var"
-	(Smalltalk getenv: 'SMALLTALK_MCP_DAEMON') = '1' ifTrue: [
+	((self envAt: 'SMALLTALK_MCP_DAEMON') = '1') ifTrue: [
 		^ self startDaemon ].
 	
 	"Original MCP mode — set by --mcp command line flag"
@@ -966,8 +1041,10 @@ version
 	   9 - Simplify MCPTransport initialize
 	   10 - Add extensive logging to debug UI startup hang
 	   11 - Remove debug logging, use correct Cuis author API
-	   12 - JMM-619: Add daemon mode (SMALLTALK_MCP_DAEMON env var) for smalltalk-daemon.py"
-	^ 12! !
+	   12 - JMM-619: Add daemon mode (SMALLTALK_MCP_DAEMON env var) for smalltalk-daemon.py
+	   13 - JMM-645: Remove SourceFiles manipulation — changes file always retained
+	   14 - JMM-645: headlessSave for Cuis, RunningInstance guard, envAt: for cross-platform"
+	^ 14! !
 
 !MCPServer class methodsFor: 'instance creation' stamp: 'jmm 2/20/2026 00:50'!
 startDaemon
@@ -983,17 +1060,7 @@ startDaemon
 	  SMALLTALK_MCP_DAEMON=1  - triggers this mode
 	  SMALLTALK_DEV_MODE=1    - keeps .changes file (else disabled)"
 	
-	| devMode |
-	
-	devMode := (Smalltalk getenv: 'SMALLTALK_DEV_MODE') = '1'.
-	
-	devMode
-		ifTrue: [
-			Transcript show: 'MCP Daemon starting in DEVELOPMENT mode'; newLine ]
-		ifFalse: [
-			SourceFiles at: 2 put: nil.
-			Transcript show: 'MCP Daemon starting in PLAYGROUND mode'; newLine ].
-	
+	Transcript show: 'MCP Daemon starting'; newLine.
 	Utilities setAuthorName: 'ClaudeSmalltalk' initials: 'LLM'.
 	
 	"Run inline — blocks this process, which is fine since we are in startUp:
@@ -1003,7 +1070,6 @@ startDaemon
 !MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/26/2026 11:00'!
 startServer
 	"Start MCP server in background process, allowing GUI to initialize normally"
-	SourceFiles at: 2 put: nil.  "Disable changes file for MCP mode"
 	Utilities setAuthorName: 'ClaudeSmalltalk' initials: 'LLM'.
 	[
 		(Delay forMilliseconds: 500) wait.
@@ -1024,70 +1090,35 @@ initialize
 
 !MCPTransport methodsFor: 'reading' stamp: ''!
 readLine
-	| temp1 temp2 |
-	temp1 := String new writeStream.
+	"Read a line from stdin using buffered async stream.
+	Uses semaphore-based waiting which allows UI to remain responsive."
+	| stream char |
+	stream := String new writeStream.
 	[
-	temp2 := stdin next.
-	temp2 isNil ifTrue: [ ^ nil ].
-	(temp2 = Character cr or: [ temp2 = Character lf ]) ifTrue: [ ^ temp1 contents ].
-	temp1 nextPut: temp2 ] repeat.! !
+	char := stdin next.
+	char isNil ifTrue: [ ^ nil ].
+	(char = Character cr or: [ char = Character lf ]) ifTrue: [ ^ stream contents ].
+	stream nextPut: char ] repeat.! !
 
 !MCPTransport methodsFor: 'reading' stamp: ''!
 readMessage
-	| temp1 |
-	temp1 := self readLine.
-	temp1 isNil ifTrue: [ ^ nil ].
-	temp1 isEmpty ifTrue: [ ^ self readMessage ].
-	^ Json readFrom: temp1 readStream.! !
+	"Read a JSON message from stdin"
+	| line |
+	line := self readLine.
+	line isNil ifTrue: [ ^ nil ].
+	line isEmpty ifTrue: [ ^ self readMessage ].
+	^ Json readFrom: line readStream.! !
 
 !MCPTransport methodsFor: 'writing' stamp: ''!
-writeMessage: arg1
-	| temp2 |
-	temp2 := arg1 copyWithout: Character cr.
-	temp2 := temp2 copyWithout: Character lf.
+writeMessage: jsonString
+	"Write a JSON message to stdout, ensuring no embedded newlines"
+	| clean |
+	clean := jsonString copyWithout: Character cr.
+	clean := clean copyWithout: Character lf.
 	stdout
-		nextPutAll: temp2;
+		nextPutAll: clean;
 		newLine;
 		flush.! !
-
-!SystemDictionary methodsFor: '*MCP-Server' stamp: ''!
-checkIfAlreadyRunningOrStoppedNoExit
-	| temp1 temp3 |
-	self currentChangesName ifNil: [ ^ self ].
-	temp1 := nil.
-	temp3 := nil.
-	self withChangesFileDo: [ :argm3_4 |
-		argm3_4 position: self lastQuitLogPosition.
-		argm3_4 atEnd ifFalse: [ temp1 := argm3_4 nextChunk ].
-		argm3_4 atEnd ifFalse: [ temp3 := argm3_4 nextChunk ]].
-	(temp1 isNil or: [
-		((Smalltalk isQuitRecord: temp1) or: [ Smalltalk isSnapshotRecord: temp1 ]) not ]) ifTrue: [
-		UISupervisor whenUIinSafeState: [ self notify: self currentChangesName asFullFileEntry pathName , String newLineString , 'Image save chunk not found. Possible image / changes file corruption. Proceed with caution.' ].
-		^ self ].
-	temp3 notNil ifTrue: [
-		(Preferences at: #checkLostChangesOnStartUp)
-			ifTrue: [ UISupervisor whenUIinSafeState: [ self restoreLostChanges ]]
-			ifFalse: [
-				(Preferences at: #warnAndOfferLastUserChanges) ifTrue: [ UISupervisor whenUIinSafeState: [ self warnAndOfferLastUserChanges ]]]].! !
-
-!SystemDictionary methodsFor: '*MCP-Server' stamp: ''!
-openSourcesAndChanges
-	"Always run without changes file - allows image to be distributed without .changes"
-	| temp1 temp9 temp3 |
-	temp1 := SourceFiles at: 1.
-	temp1 ifNil: [
-		temp9 := self defaultSourcesName asFullFileEntry.
-		temp9 exists ifFalse: [ temp9 := self alternativeSourcesName asFullFileEntry ].
-		temp9 exists ifTrue: [
-			temp1 := [ temp9 readStream ]
-				on: FileDoesNotExistException
-				do: [ ]]].
-	(temp1 isNil and: [ Preferences at: #warnIfNoSourcesFile ]) ifTrue: [
-		temp3 := 'Cuis cannot locate the sources file named ' , temp9 pathName , '.' , String newLineString , 'Please check that the file is properly named and is in the same directory as this image.'.
-		self logStartupError: temp3 ].
-	SourceFiles := Array
-		with: temp1
-		with: nil.! !
 
 "Register MCPServer for startup"!
 Smalltalk addToStartUpList: MCPServer!
