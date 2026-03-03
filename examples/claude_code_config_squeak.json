@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "squeakDirect": {
-      "type": "stdio",
-      "command": "/path/to/Squeak6.0.app/Contents/MacOS/Squeak",
-      "args": ["/path/to/ClaudeSqueak6.0.image", "--mcp"]
-    }
-  }
-}

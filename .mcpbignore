@@ -1,0 +1,54 @@
+# Bundle contains: manifest.json, pyproject.toml, CLAUDE-README-MCPB.md,
+# smalltalk_agent_mcp.py, smalltalk_agent.py, smalltalk-mcp-example.json
+
+# Git
+.git/
+.github/
+.gitignore
+.gitmodules
+
+# Smalltalk packages and images
+*.pck.st
+*.st
+*.image
+*.changes
+*.sources
+OSProcess/
+
+# Documentation (not needed in bundle)
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+CUIS-SETUP.md
+ClaudeSmalltalk-Usage-Guide.md
+OPENAI-SETUP.md
+OPENCLAW-SETUP.md
+README.md
+SECURITY.md
+SKILL.md
+SQUEAK-SETUP.md
+DCO
+LICENSE
+LICENSE-CUIS
+LICENSE-MQTT
+
+# Other Python files
+claudeCuis_mcp.py
+openai_mcp.py
+openai_tools.py
+claude_smalltalk/
+
+# Config and examples dir
+.smalltalk-mcp.json
+smalltalk-mcp.json
+examples/
+
+# Requirements (UV handles deps via pyproject.toml)
+requirements*.txt
+
+# Build artifacts
+*.mcpb
+*.egg-info/
+*.pyc
+*.pyo
+__pycache__/
+.DS_Store
