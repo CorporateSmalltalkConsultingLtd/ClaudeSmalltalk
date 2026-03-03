@@ -1,0 +1,78 @@
+# Bundle should contain ONLY: manifest.json, pyproject.toml,
+# smalltalk_agent_mcp.py, smalltalk_agent.py, CLAUDE-README-MCPB.md,
+# smalltalk-mcp-example.json
+
+# Directories
+.git/
+.github/
+.claude/
+chatScripts/
+claude_smalltalk/
+clawdbot/
+examples/
+openclaw/
+orignalspecs/
+OSProcess/
+Logs/
+dist/
+build/
+mcp-publisher/
+__pycache__/
+*.app/
+sqcogspur64linuxht/
+
+# Smalltalk files
+*.st
+*.pck.st
+*.image
+*.changes
+*.sources
+
+# Docs
+CHANGES.md
+CLAUDE.md
+ClaudeSmalltalk-Usage-Guide.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+CUIS-SETUP.md
+OPENAI-SETUP.md
+OPENCLAW-SETUP.md
+README.md
+SECURITY.md
+SKILL.md
+SocketStream-Concurrency.md
+SQUEAK-SETUP.md
+SYNC-STATUS.md
+TASK.md
+DCO
+LICENSE
+LICENSE-CUIS
+LICENSE-MQTT
+
+# Config files (user provides their own)
+.smalltalk-mcp.json
+smalltalk-mcp.json
+cuisMQTT_config.json
+mcp.json
+.mcp.json
+server.json
+
+# Other Python files not needed
+openai_mcp.py
+openai_tools.py
+claudeCuis_mcp.py
+mqtt5_property_verifier.py
+mqtt5_go_verifier.go
+restore_varnames.py
+
+# Build artifacts and misc
+*.mcpb
+*.egg-info/
+*.pyc
+*.pyo
+*.tar.gz
+*.txt
+crash.dmp
+.DS_Store
+.mcpregistry*
+.gitmodules

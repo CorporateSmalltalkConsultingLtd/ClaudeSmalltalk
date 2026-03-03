@@ -18,7 +18,7 @@ TestCase subclass: #MQTTIntegrationTest
 MQTTIntegrationTest tests MQTT client against a real broker.
 
 Configure broker settings before running:
-  MQTTIntegrationTest configureBroker: 'your-broker' port: 1883 username: 'your-user' password: 'your-pass'.
+  MQTTIntegrationTest configureBroker: '192.168.1.158' port: 1883 username: 'Hudson' password: 'manager'.
 
 Run tests:
   MQTTIntegrationTest buildSuite run inspect!
@@ -38,7 +38,7 @@ configureBroker: host port: port username: user password: pwd
 
 !MQTTIntegrationTest class methodsFor: 'configuration' stamp: 'JMM 1/18/2026 12:00'!
 brokerHost
-	^ BrokerHost ifNil: ['localhost']! !
+	^ BrokerHost ifNil: ['192.168.1.158']! !
 
 !MQTTIntegrationTest class methodsFor: 'configuration' stamp: 'JMM 1/18/2026 12:00'!
 brokerPort
@@ -46,11 +46,11 @@ brokerPort
 
 !MQTTIntegrationTest class methodsFor: 'configuration' stamp: 'JMM 1/18/2026 12:00'!
 brokerUsername
-	^ BrokerUsername! !
+	^ BrokerUsername ifNil: ['Hudson']! !
 
 !MQTTIntegrationTest class methodsFor: 'configuration' stamp: 'JMM 1/18/2026 12:00'!
 brokerPassword
-	^ BrokerPassword! !
+	^ BrokerPassword ifNil: ['manager']! !
 
 !MQTTIntegrationTest class methodsFor: 'testing' stamp: 'JMM 1/18/2026 12:00'!
 isAbstract
