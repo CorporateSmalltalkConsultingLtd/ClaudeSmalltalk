@@ -25,7 +25,7 @@ PROJECTS_PY = SCRIPT_DIR / 'smalltalk-projects.py'
 DAEMON_PY = SCRIPT_DIR / 'smalltalk-daemon.py'
 DEV_DAEMON_PY = SCRIPT_DIR / 'smalltalk-dev-daemon.py'
 SMALLTALK_PY = SCRIPT_DIR / 'smalltalk.py'
-STATE_FILE = Path.home() / '.clawdbot' / 'smalltalk' / 'current-mode.json'
+STATE_FILE = Path.home() / '.openclaw' / 'smalltalk' / 'current-mode.json'
 
 DEFAULT_IMAGE = '/home/johnmci/ClaudeSqueak.image'
 DEFAULT_CHANGES = '/home/johnmci/ClaudeSqueak.changes'
