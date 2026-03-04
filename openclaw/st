@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""
+Smalltalk CLI - Unified interface for playground and development modes
+JMM-512 Implementation
+
+Usage:
+    st                      # Interactive mode selection
+    st playground           # Start playground mode
+    st project new <name>   # Create new project
+    st project load <path>  # Load existing project
+    st project list         # List recent projects
+    st snapshot <name>      # Create snapshot (dev mode)
+    st restore <name>       # Restore snapshot (dev mode)
+    st <command> [args]     # Pass through to smalltalk.py
+"""
+
+import os
+import sys
+import json
+import subprocess
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).parent
+PROJECTS_PY = SCRIPT_DIR / 'smalltalk-projects.py'
+DAEMON_PY = SCRIPT_DIR / 'smalltalk-daemon.py'
+DEV_DAEMON_PY = SCRIPT_DIR / 'smalltalk-dev-daemon.py'
+SMALLTALK_PY = SCRIPT_DIR / 'smalltalk.py'
+STATE_FILE = Path.home() / '.clawdbot' / 'smalltalk' / 'current-mode.json'
+
+DEFAULT_IMAGE = '/home/johnmci/ClaudeSqueak.image'
+DEFAULT_CHANGES = '/home/johnmci/ClaudeSqueak.changes'
+
+def load_state():
+    """Load current mode state."""
+    if STATE_FILE.exists():
+        try:
+            return json.loads(STATE_FILE.read_text())
+        except:
+            pass
+    return {'mode': 'playground'}
+
+def save_state(state):
+    """Save current mode state."""
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+def run_projects(*args):
+    """Run projects manager."""
+    subprocess.run([sys.executable, str(PROJECTS_PY)] + list(args))
+
+def interactive_select():
+    """Interactive mode selection."""
+    from smalltalk_projects import interactive_mode_select, load_recent
+    
+    print("\n" + "="*60)
+    print("🎯 Smalltalk Mode Selection")
+    print("="*60)
+    print()
+    print("  1. Playground     - Ephemeral sandbox (no persistence)")
+    print("  2. New Project    - Create saveable working copy")
+    print("  3. Load Project   - Open existing project")
+    
+    recent = load_recent()
+    recent_valid = [r for r in recent if Path(r['path']).exists()][:3]
+    
+    if recent_valid:
+        print()
+        print("  Recent:")
+        for i, proj in enumerate(recent_valid, 4):
+            print(f"  {i}. {proj['name']}")
+    
+    print()
+    choice = input("Select [1]: ").strip() or '1'
+    
+    if choice == '1':
+        # Playground mode
+        print("\n🎮 Starting Playground mode...")
+        subprocess.run([sys.executable, str(DAEMON_PY), 'start'])
+        save_state({'mode': 'playground'})
+        print("\n✅ Playground ready! Use 'st evaluate \"3+4\"' to test.")
+        
+    elif choice == '2':
+        # New project
+        print()
+        name = input("Project name: ").strip()
+        if not name:
+            print("❌ Name required")
+            return
+        
+        from smalltalk_projects import create_project
+        proj = create_project(name, DEFAULT_IMAGE, DEFAULT_CHANGES)
+        if proj:
+            save_state({
+                'mode': 'development',
+                'project': name,
+                'image': str(proj['image']),
+                'changes': str(proj['changes']),
+                'dir': str(proj['dir'])
+            })
+            print(f"\n🚀 Starting development daemon for {name}...")
+            subprocess.run([
+                sys.executable, str(DEV_DAEMON_PY), 'start',
+                '--project', name,
+                '--image', str(proj['image']),
+                '--changes', str(proj['changes'])
+            ])
+            print(f"\n✅ Project '{name}' ready!")
+            
+    elif choice == '3':
+        # Load project
+        print()
+        path = input("Project path: ").strip()
+        if not path:
+            print("❌ Path required")
+            return
+        
+        from smalltalk_projects import load_project
+        proj = load_project(Path(path).expanduser())
+        if proj:
+            save_state({
+                'mode': 'development',
+                'project': proj['name'],
+                'image': str(proj['image']),
+                'changes': str(proj['changes']),
+                'dir': str(proj['dir'])
+            })
+            print(f"\n🚀 Starting development daemon...")
+            subprocess.run([
+                sys.executable, str(DEV_DAEMON_PY), 'start',
+                '--project', proj['name'],
+                '--image', str(proj['image']),
+                '--changes', str(proj['changes'])
+            ])
+            print(f"\n✅ Project '{proj['name']}' ready!")
+            
+    elif choice.isdigit() and int(choice) >= 4:
+        # Recent project
+        idx = int(choice) - 4
+        if idx < len(recent_valid):
+            from smalltalk_projects import load_project
+            proj = load_project(recent_valid[idx]['path'])
+            if proj:
+                save_state({
+                    'mode': 'development',
+                    'project': proj['name'],
+                    'image': str(proj['image']),
+                    'changes': str(proj['changes']),
+                    'dir': str(proj['dir'])
+                })
+                print(f"\n🚀 Starting development daemon...")
+                subprocess.run([
+                    sys.executable, str(DEV_DAEMON_PY), 'start',
+                    '--project', proj['name'],
+                    '--image', str(proj['image']),
+                    '--changes', str(proj['changes'])
+                ])
+                print(f"\n✅ Project '{proj['name']}' ready!")
+        else:
+            print("❌ Invalid selection")
+
+def main():
+    # Add script dir to path for imports
+    sys.path.insert(0, str(SCRIPT_DIR))
+    
+    if len(sys.argv) < 2:
+        # No args - interactive mode
+        interactive_select()
+        return
+    
+    cmd = sys.argv[1]
+    args = sys.argv[2:]
+    
+    if cmd == 'mode':
+        # Show current mode
+        state = load_state()
+        print(f"Current mode: {state.get('mode', 'unknown')}")
+        if state.get('project'):
+            print(f"Project: {state['project']}")
+            print(f"Image: {state.get('image')}")
+        
+    elif cmd == 'playground':
+        # Switch to playground
+        subprocess.run([sys.executable, str(DAEMON_PY), 'start'])
+        save_state({'mode': 'playground'})
+        print("✅ Playground mode active")
+        
+    elif cmd == 'project':
+        if not args:
+            print("Usage: st project [new|load|list|snapshot|restore]")
+            return
+        subcmd = args[0]
+        subargs = args[1:]
+        
+        if subcmd == 'new':
+            if not subargs:
+                print("Usage: st project new <name>")
+                return
+            name = subargs[0]
+            from smalltalk_projects import create_project
+            proj = create_project(name, DEFAULT_IMAGE, DEFAULT_CHANGES)
+            if proj:
+                save_state({
+                    'mode': 'development',
+                    'project': name,
+                    'image': str(proj['image']),
+                    'changes': str(proj['changes']),
+                    'dir': str(proj['dir'])
+                })
+                
+        elif subcmd == 'load':
+            if not subargs:
+                print("Usage: st project load <path>")
+                return
+            from smalltalk_projects import load_project
+            proj = load_project(Path(subargs[0]).expanduser())
+            if proj:
+                save_state({
+                    'mode': 'development',
+                    'project': proj['name'],
+                    'image': str(proj['image']),
+                    'changes': str(proj['changes']),
+                    'dir': str(proj['dir'])
+                })
+                
+        elif subcmd == 'list':
+            from smalltalk_projects import list_recent
+            list_recent()
+            
+        elif subcmd == 'snapshot':
+            state = load_state()
+            if state.get('mode') != 'development':
+                print("❌ Snapshots only available in development mode")
+                return
+            name = subargs[0] if subargs else None
+            from smalltalk_projects import create_snapshot
+            create_snapshot(state['dir'], name)
+            
+        elif subcmd == 'restore':
+            state = load_state()
+            if state.get('mode') != 'development':
+                print("❌ Restore only available in development mode")
+                return
+            if not subargs:
+                from smalltalk_projects import list_snapshots
+                list_snapshots(state['dir'])
+            else:
+                from smalltalk_projects import restore_snapshot
+                restore_snapshot(state['dir'], subargs[0])
+    
+    elif cmd == 'snapshot':
+        # Shortcut for project snapshot
+        state = load_state()
+        if state.get('mode') != 'development':
+            print("❌ Snapshots only available in development mode")
+            return
+        name = args[0] if args else None
+        from smalltalk_projects import create_snapshot
+        create_snapshot(state['dir'], name)
+        
+    elif cmd == 'restore':
+        # Shortcut for project restore
+        state = load_state()
+        if state.get('mode') != 'development':
+            print("❌ Restore only available in development mode")
+            return
+        if not args:
+            from smalltalk_projects import list_snapshots
+            list_snapshots(state['dir'])
+        else:
+            from smalltalk_projects import restore_snapshot
+            restore_snapshot(state['dir'], args[0])
+    
+    else:
+        # Pass through to smalltalk.py
+        subprocess.run([sys.executable, str(SMALLTALK_PY), cmd] + args)
+
+if __name__ == '__main__':
+    main()
