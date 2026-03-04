@@ -33,7 +33,7 @@ Follow [SQUEAK-SETUP.md](SQUEAK-SETUP.md) to:
 3. Register MCPServer for startup
 4. Save as `ClaudeSqueak.image`
 
-Or for Cuis, use the provided `ClaudeCuis.image`.
+Or for Cuis, build a `ClaudeCuis.image` following [CUIS-SETUP.md](CUIS-SETUP.md).
 
 ## Step 4: Set Up Sources File
 
@@ -53,7 +53,7 @@ Copy the skill to your OpenClaw skills directory:
 
 ```bash
 mkdir -p ~/clawd/skills/smalltalk/openclaw
-cp openclaw/SKILL.md ~/clawd/skills/smalltalk/openclaw/
+cp SKILL.md ~/clawd/skills/smalltalk/
 cp openclaw/smalltalk.py ~/clawd/skills/smalltalk/openclaw/
 cp openclaw/smalltalk-daemon.py ~/clawd/skills/smalltalk/openclaw/
 cp openclaw/smalltalk-dev-daemon.py ~/clawd/skills/smalltalk/openclaw/
@@ -375,4 +375,4 @@ MCPServer (14 tools, v7)
 | `smalltalk-dev-daemon.py` | Dev mode variant of the daemon |
 | `smalltalk_projects.py` | Project management utilities |
 | `st` | CLI wrapper for quick Smalltalk interaction |
-| `SKILL.md` | OpenClaw skill definition |
+| `SKILL.md` | OpenClaw skill definition (in repo root) |

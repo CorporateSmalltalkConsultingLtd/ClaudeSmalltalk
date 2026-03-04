@@ -15,7 +15,7 @@ If the Smalltalk MCP tools are not available, help the user configure them:
 - Python 3.10+
 - A Smalltalk VM: [Cuis](https://github.com/Cuis-Smalltalk/Cuis-Smalltalk-Dev) or [Squeak](https://squeak.org/downloads/)
 - The ClaudeSmalltalk repository: `git clone https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk.git`
-- A pre-built `ClaudeCuis.image` is included in the repo. For Squeak, see SQUEAK-SETUP.md.
+- Build a `ClaudeCuis.image` following CUIS-SETUP.md. For Squeak, see SQUEAK-SETUP.md.
 
 ### Step 1: Install Python dependency
 
