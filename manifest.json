@@ -4,7 +4,7 @@
   "display_name": "Smalltalk Agent",
   "version": "2.0.0",
   "description": "MCP server for AI interaction with live Smalltalk images (Squeak and Cuis). Browse classes, evaluate expressions, define methods, and run autonomous code review — all against a running Smalltalk image.",
-  "long_description": "Connect Claude to a live Smalltalk programming environment. Supports 15 tools including class browsing, method source viewing, expression evaluation, method definition, and an autonomous agent mode that delegates Smalltalk reasoning to a configurable LLM (Ollama, Anthropic, OpenAI, or xAI).\n\nSupports three transport modes:\n- **Daemon**: Unix socket to a running Smalltalk process\n- **MQTT**: Remote images via MQTT broker\n- **Stdio**: Launch Smalltalk VM as a subprocess\n\nWorks with Squeak and Cuis Smalltalk images.",
+  "long_description": "Connect Claude to a live Smalltalk programming environment. Supports 13 tools (12 fine-grained + 1 autonomous agent) including class browsing, method source viewing, expression evaluation, method definition, and an autonomous agent mode that delegates Smalltalk reasoning to a configurable LLM (Ollama, Anthropic, OpenAI, or xAI).\n\nSupports three transport modes:\n- **Daemon**: Unix socket to a running Smalltalk process\n- **MQTT**: Remote images via MQTT broker\n- **Stdio**: Launch Smalltalk VM as a subprocess\n\nWorks with Squeak and Cuis Smalltalk images.",
   "author": {
     "name": "Corporate Smalltalk Consulting Ltd",
     "url": "https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk"
@@ -33,19 +33,19 @@
       "description": "Run a complex Smalltalk task using an autonomous agent loop with a configurable LLM"
     },
     {
-      "name": "evaluate",
+      "name": "smalltalk_evaluate",
       "description": "Evaluate a Smalltalk expression in the live image"
     },
     {
-      "name": "browse",
+      "name": "smalltalk_browse",
       "description": "Browse a Smalltalk class (methods, hierarchy, categories)"
     },
     {
-      "name": "method_source",
+      "name": "smalltalk_method_source",
       "description": "Get the source code of a Smalltalk method"
     },
     {
-      "name": "define_method",
+      "name": "smalltalk_define_method",
       "description": "Define or modify a method in the live Smalltalk image"
     }
   ],

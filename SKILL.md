@@ -81,13 +81,13 @@ The user must edit `~/Library/Application Support/Claude/claude_desktop_config.j
 
 An example is at `examples/claude_desktop_config.json`. All paths must be absolute.
 
-After saving, Claude Desktop will reload and the 15 Smalltalk tools will become available.
+After saving, Claude Desktop will reload and the 13 Smalltalk tools will become available.
 
 ---
 
 ## How to use the tools
 
-Once connected, you have 15 MCP tools for the live Smalltalk image.
+Once connected, you have 13 MCP tools for the live Smalltalk image.
 
 ### When to use `smalltalk_task` vs individual tools
 
@@ -158,5 +158,3 @@ Run SUnit tests: `MyClassTest buildSuite run`
 | `smalltalk_subclasses` | Get immediate subclasses of a class |
 | `smalltalk_list_categories` | List all system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
-| `smalltalk_save_image` | Save the current image (dev mode only) |
-| `smalltalk_save_as_new_version` | Save as next version number (dev mode only) |

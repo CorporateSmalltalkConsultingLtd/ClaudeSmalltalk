@@ -8,4 +8,4 @@ httpx>=0.25.0
 # anthropic>=0.40.0
 
 # Optional — only if transport.type is "mqtt"
-# paho-mqtt>=1.6.0
+# paho-mqtt>=2.0.0
