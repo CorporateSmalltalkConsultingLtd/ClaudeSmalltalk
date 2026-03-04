@@ -1,497 +1,208 @@
-<!-- mcp-name: io.github.johnmci/ClaudeSmalltalk -->
 # ClaudeSmalltalk
 
-Interface for Claude to interact with live Smalltalk images (Cuis and Squeak) via MCP (Model Context Protocol).
-
-This project enables Claude to evaluate Smalltalk code, browse classes, define methods, and more in a running Smalltalk environment.
+Connect Claude Desktop to a live Smalltalk programming environment. Browse classes, evaluate expressions, define methods, and run autonomous code review — all against a running Squeak or Cuis image.
 
 Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
-## Four MCP Server Options
+## What It Does
 
-### Option B: Cuis Native MCP (RECOMMENDED for Cuis)
-
-```
-┌─────────────┐     MCP/stdio     ┌─────────────────┐
-│   Claude    │ ◄────────────────► │ Cuis Smalltalk  │
-│  (Desktop   │    (JSON Lines)    │   (with GUI)    │
-│  or Code)   │                    │   MCPServer     │
-└─────────────┘                    └─────────────────┘
-```
-
-- **Simplest setup** - No Python, no MQTT broker required
-- **Responsive GUI** - Cuis GUI remains responsive during MCP operations
-- Uses OSProcess with `BufferedAsyncFileReadStream` for non-blocking stdio
-- Claude spawns the Cuis image directly
-- 14 tools available (includes save tools in dev mode, class-side method support in v7)
-
-### Option C: Squeak Native MCP (RECOMMENDED for Squeak)
+Claude gets 15 Smalltalk tools — evaluate code, browse classes, read/write methods, navigate hierarchies, and run an autonomous agent that delegates Smalltalk reasoning to a configurable LLM (Ollama for free/local, or Anthropic/OpenAI/xAI).
 
 ```
-┌─────────────┐     MCP/stdio     ┌─────────────────┐
-│   Claude    │ ◄────────────────► │ Squeak 6.0      │
-│  (Desktop   │    (JSON Lines)    │   (with GUI)    │
-│  or Code)   │                    │   MCPServer     │
-└─────────────┘                    └─────────────────┘
+You → Claude Desktop → Smalltalk Agent → Your LLM → Live Smalltalk Image
+                        (MCP server)      (Ollama)    (Squeak or Cuis)
 ```
 
-- **Responsive GUI** - Squeak GUI remains responsive during MCP operations
-- Uses OSProcess with `BufferedAsyncFileReadStream` for non-blocking stdio
-- 14 tools available (v7 — class-side method support, save tools in dev mode)
-- Server-side processing: 0-3ms per request
+The agent isolates Smalltalk reasoning from your chat model. Claude Desktop triggers the work, but a separate model (which can be local and free) does the actual Smalltalk coding.
 
-### Option A: Python/MQTT Bridge
+## Quick Start
 
-```
-┌─────────────┐     MCP      ┌─────────────────┐     MQTT      ┌─────────────────┐
-│   Claude    │ ◄──────────► │  claudeCuis_mcp │ ◄───────────► │ Cuis Smalltalk  │
-│  (Desktop   │   (stdio)    │    (Python)     │  (pub/sub)    │     Image       │
-│  or Code)   │              │                 │               │ ClaudeHandler   │
-└─────────────┘              └─────────────────┘               └─────────────────┘
-```
+### 1. Get a Smalltalk VM and Image
 
-- Good for **development** (image stays running with GUI)
-- Requires Python 3.10+ and MQTT broker
+**Squeak** (recommended to start):
+- Download [Squeak 6.0](https://squeak.org/downloads/) — the All-in-One package includes VM and image
+- Follow [SQUEAK-SETUP.md](SQUEAK-SETUP.md) to install the MCP server into the image
 
-### Option D: OpenAI Bridge (ChatGPT)
+**Cuis Smalltalk**:
+- Clone [Cuis-Smalltalk-Dev](https://github.com/Cuis-Smalltalk/Cuis-Smalltalk-Dev)
+- Follow [CUIS-SETUP.md](CUIS-SETUP.md) to build a ClaudeCuis image
 
-```
-┌─────────────┐     HTTPS     ┌─────────────────┐    stdio/MCP    ┌─────────────────┐
-│   OpenAI    │ ◄────────────► │  openai_mcp.py  │ ◄──────────────► │ Squeak 6.0      │
-│   (Cloud)   │   (API calls)  │  (Python)       │   (JSON-RPC)    │   MCPServer     │
-└─────────────┘                └─────────────────┘                 └─────────────────┘
-```
+> **macOS note:** Place the VM and image files in `/Applications/` or your home directory. Files in `~/Documents/` or `~/Desktop/` may be blocked by macOS privacy restrictions (TCC). See [macOS Permissions](#macos-permissions) below.
 
-- Enables **ChatGPT** to execute Smalltalk code via the same 14 tools
-- Requires Python 3.10+ and OpenAI API key
-- See [OPENAI-SETUP.md](OPENAI-SETUP.md) for detailed instructions
+### 2. Create a Configuration File and Install
 
-### Option E: Clawdbot Integration
+Follow the [CLAUDE-README-MCPB.md](CLAUDE-README-MCPB.md) setup guide — it covers creating your `smalltalk-mcp.json` config file and installing the desktop extension step by step.
 
-```
-┌─────────────┐    Telegram     ┌─────────────────┐    exec/stdio   ┌─────────────────┐
-│    User     │ ◄──────────────► │    Clawdbot     │ ◄──────────────► │ Squeak 6.0      │
-│  (Mobile/   │    (messages)   │   (AI Agent)    │   (subprocess)  │   MCPServer     │
-│  Desktop)   │                 │                 │                 │                 │
-└─────────────┘                 └─────────────────┘                 └─────────────────┘
-```
+See `examples/` for additional configs using OpenAI, xAI, MQTT, and different image types.
 
-- Enables **Clawdbot** (Telegram/Discord AI agent) to interact with Smalltalk
-- Persistent daemon mode with Unix socket — VM stays running between conversations
-- Playground mode (ephemeral) and dev mode (persistent) with project management
-- LLM-powered explain and audit tools (requires OpenAI API key)
-- Includes debug tools: `--check` (verify setup) and `--debug` (SIGUSR1 stack trace + screenshot)
-- See [CLAWDBOT-SETUP.md](CLAWDBOT-SETUP.md) for detailed instructions
+### Alternative: Manual Configuration
 
-## Prerequisites
+If you prefer not to use the desktop extension, you can configure Claude Desktop or Claude Code manually.
 
-**For Option B (Cuis Native MCP):**
-- **Cuis Smalltalk VM** (Squeak VM or Cog VM)
-- **OSProcess package** (available via `Feature require: 'OSProcess'`)
-- **ClaudeCuis.image** (provided, or build your own)
+#### Claude Desktop (manual JSON)
 
-**For Option C (Squeak Native MCP):**
-- **Squeak 6.0** from https://squeak.org/downloads/
-- **OSProcess package** (installed via Monticello)
-- See [SQUEAK-SETUP.md](SQUEAK-SETUP.md) for detailed instructions
-
-**For Option A (Python/MQTT Bridge):**
-- **Python 3.10+** (MCP SDK requirement)
-- **MQTT Broker** (e.g., Mosquitto) accessible from both Claude and the Smalltalk image
-- **Cuis Smalltalk** image with Network-Kernel package
-
-**For Option D (OpenAI Bridge):**
-- **Python 3.10+** (OpenAI SDK requirement)
-- **OpenAI API Key** from https://platform.openai.com/api-keys
-- **Squeak 6.0** with MCP server (same as Option C)
-
-**For Option E (Clawdbot):**
-- **Clawdbot** installed and configured (https://github.com/clawdbot/clawdbot)
-- **Squeak 6.0** with MCP server (same as Option C)
-- **Xvfb** and **ImageMagick** for headless operation on Linux
-- **Python 3.10+** for the skill wrapper
-
----
-
-## Installation: Option B (Cuis Native MCP)
-
-### 1. Configure Claude
-
-#### For Claude Code (CLI)
-
-Add to `~/.claude.json` or project `.claude.json`:
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
 {
   "mcpServers": {
-    "cuisDirect": {
-      "type": "stdio",
-      "command": "/path/to/CuisVM.app/Contents/MacOS/Squeak",
-      "args": ["/path/to/ClaudeCuis.image", "--mcp"]
-    }
-  }
-}
-```
-
-#### For Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or equivalent:
-
-```json
-{
-  "mcpServers": {
-    "cuisDirect": {
-      "command": "/path/to/CuisVM.app/Contents/MacOS/Squeak",
-      "args": ["/path/to/ClaudeCuis.image", "--mcp"]
-    }
-  }
-}
-```
-
-### 2. (Optional) Build Your Own Image
-
-If you want to build your own image instead of using the provided `ClaudeCuis.image`:
-
-```smalltalk
-Feature require: 'JSON'.
-Feature require: 'OSProcess'.
-CodePackageFile installPackage: '/path/to/MCP-Server.pck.st' asFileEntry.
-Smalltalk saveImage.
-```
-
-The MCP server starts automatically when the image is launched with `--mcp`.
-
----
-
-## Installation: Option C (Squeak Native MCP)
-
-See [SQUEAK-SETUP.md](SQUEAK-SETUP.md) for detailed step-by-step instructions.
-
-### Quick Start
-
-1. **Download Squeak 6.0** from https://squeak.org/downloads/
-2. **Install OSProcess** via Monticello Browser (repository: `http://www.squeaksource.com/OSProcess`)
-3. **File in MCP-Server-Squeak.st**
-4. **Register startup**: `Smalltalk addToStartUpList: MCPServer`
-5. **Save image** as `ClaudeSqueak6.0.image`
-6. **Configure Claude Code**:
-
-```json
-{
-  "mcpServers": {
-    "squeakDirect": {
-      "type": "stdio",
-      "command": "/path/to/Squeak6.0.app/Contents/MacOS/Squeak",
-      "args": ["/path/to/ClaudeSqueak6.0.image", "--mcp"]
-    }
-  }
-}
-```
-
-**Note**: The Squeak image is NOT provided in this repository. Users build their own from a fresh Squeak 6.0 download, ensuring they have the latest VM and can customize their environment.
-
----
-
-## Installation: Option A (Python/MQTT Bridge)
-
-### 1. Set Up Python Environment
-
-```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 2. Load Cuis Packages
-
-Load the packages in this order in your Cuis Smalltalk image:
-
-```smalltalk
-Feature require: 'Network-Kernel'.  "If not already loaded"
-```
-
-Then file in the packages:
-
-1. `MQTT-Cuis.pck.st` - MQTT client library
-2. `ClaudeCuis.pck.st` - Claude handler
-
-Optional test packages:
-- `MQTT-Cuis-Tests.pck.st` - MQTT unit tests
-- `MQTT-Cuis-IntegrationTests.pck.st` - Integration tests
-- `ClaudeCuis-Tests.pck.st` - Handler unit tests
-
-### 3. Start ClaudeHandler in Cuis
-
-```smalltalk
-| client handler |
-client := MQTTClientInterface
-    openOnHostName: 'your-mqtt-broker'
-    port: 1883
-    keepAlive: 60.
-client username: 'your-username' password: 'your-password'.
-client connect.
-handler := ClaudeHandler on: client imageId: 'dev1'.
-handler start.
-```
-
-### 4. Configure Claude
-
-#### For Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or equivalent:
-
-```json
-{
-  "mcpServers": {
-    "claudeCuis": {
-      "command": "/path/to/venv/bin/python",
-      "args": ["/path/to/claudeCuis_mcp.py"],
+    "smalltalkAgent": {
+      "command": "python3",
+      "args": ["/path/to/ClaudeSmalltalk/smalltalk_agent_mcp.py"],
       "env": {
-        "MQTT_BROKER": "your-mqtt-broker",
-        "MQTT_PORT": "1883",
-        "MQTT_USERNAME": "your-username",
-        "MQTT_PASSWORD": "your-password",
-        "CLAUDE_IMAGE_ID": "dev1",
-        "CLAUDE_TIMEOUT": "30"
+        "SMALLTALK_MCP_CONFIG": "/path/to/smalltalk-mcp.json"
       }
     }
   }
 }
 ```
 
-#### For Claude Code (CLI)
+Requires Python 3.10+ and `pip install httpx`.
 
-Add to `~/.claude.json` or project `.claude.json`:
+#### Claude Code CLI
 
-```json
-{
-  "mcpServers": {
-    "claudeCuis": {
-      "type": "stdio",
-      "command": "/path/to/venv/bin/python",
-      "args": ["/path/to/claudeCuis_mcp.py"],
-      "env": {
-        "MQTT_BROKER": "your-mqtt-broker",
-        "MQTT_PORT": "1883",
-        "MQTT_USERNAME": "your-username",
-        "MQTT_PASSWORD": "your-password",
-        "CLAUDE_IMAGE_ID": "dev1",
-        "CLAUDE_TIMEOUT": "30"
-      }
-    }
-  }
-}
-```
-
-### 5. (Optional) Add Smalltalk Skill for Claude Code
-
-Create `.claude/skills/smalltalk/SKILL.md` in your project:
+Claude Code is a separate product from Claude Desktop and does not use `.mcpb` extensions. Register the MCP server directly:
 
 ```bash
-mkdir -p .claude/skills/smalltalk
-cp examples/SKILL.md .claude/skills/smalltalk/
+claude mcp add smalltalkAgent -- python3 /path/to/ClaudeSmalltalk/smalltalk_agent_mcp.py
 ```
 
-This enables `/smalltalk` command and auto-invocation for Smalltalk tasks.
+Set the env var: `export SMALLTALK_MCP_CONFIG=/path/to/smalltalk-mcp.json`
 
----
+Requires Python 3.10+, `pip install httpx`, and the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
 
-## Installation: Option D (OpenAI Bridge)
+### 4. Verify It Works
 
-See [OPENAI-SETUP.md](OPENAI-SETUP.md) for detailed step-by-step instructions.
+Open Claude Desktop and ask:
 
-### Quick Start
+> "List all Smalltalk classes that start with String"
 
-1. **Set up Squeak MCP server** (same as Option C)
-2. **Install Python dependencies**:
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install openai>=1.0.0
-```
-
-3. **Set environment variables**:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-export SQUEAK_VM_PATH="/path/to/Squeak"
-export SQUEAK_IMAGE_PATH="/path/to/ClaudeSqueak.image"
-```
-
-4. **Run the bridge**:
-
-```bash
-# Interactive mode
-python openai_mcp.py
-
-# Single query mode
-python openai_mcp.py "Evaluate 3 factorial in Smalltalk"
-```
-
-## Installation: Option E (Clawdbot)
-
-See [CLAWDBOT-SETUP.md](CLAWDBOT-SETUP.md) for detailed step-by-step instructions.
-
-### Quick Start
-
-1. **Set up Squeak MCP server** (same as Option C)
-2. **Install dependencies**:
-
-```bash
-sudo apt install xvfb imagemagick
-```
-
-3. **Copy skill files** to your Clawdbot workspace:
-
-```bash
-cp -r clawdbot/ ~/clawd/skills/smalltalk/
-```
-
-4. **Verify setup**:
-
-```bash
-python3 ~/clawd/skills/smalltalk/clawdbot/smalltalk.py --check
-```
-
-5. **Debug a hung image**:
-
-```bash
-python3 ~/clawd/skills/smalltalk/clawdbot/smalltalk.py --debug
-```
-
-This generates `/tmp/ClaudeSmalltalkDebug_YYYYMMDD_HHMMSS.html` with:
-- Screenshot of the Squeak display
-- Full SIGUSR1 stack trace of all processes
-
----
+If you see class names returned, you're connected.
 
 ## Available Tools
 
 | Tool | Description |
 |------|-------------|
+| `smalltalk_task` | Run a complex task via autonomous agent loop |
 | `smalltalk_evaluate` | Execute Smalltalk code and return result |
-| `smalltalk_browse` | Get class metadata (superclass, instance vars, instance `methods` and `classMethods`) |
-| `smalltalk_method_source` | View source code of a method (supports `side` param for class-side methods) |
+| `smalltalk_browse` | Get class metadata (superclass, ivars, methods) |
+| `smalltalk_method_source` | View source code of a method |
 | `smalltalk_define_class` | Create or modify a class definition |
 | `smalltalk_define_method` | Add or update a method |
 | `smalltalk_delete_method` | Remove a method from a class |
 | `smalltalk_delete_class` | Remove a class from the system |
 | `smalltalk_list_classes` | List classes matching a prefix |
-| `smalltalk_hierarchy` | Get superclass chain for a class |
-| `smalltalk_subclasses` | Get immediate subclasses of a class |
+| `smalltalk_hierarchy` | Get superclass chain |
+| `smalltalk_subclasses` | Get immediate subclasses |
 | `smalltalk_list_categories` | List all system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
-| `smalltalk_save_image` | Save the current image in place (dev mode only) |
-| `smalltalk_save_as_new_version` | Save image/changes as next version number (dev mode only) |
+| `smalltalk_save_image` | Save the current image (dev mode only) |
+| `smalltalk_save_as_new_version` | Save as next version number (dev mode only) |
 
-**Note:** `smalltalk_save_image` and `smalltalk_save_as_new_version` are only available when `SMALLTALK_DEV_MODE=1`. In playground mode (default), these return errors.
+## Configuration Reference
 
-## Usage Examples
+### Supported LLM Providers
 
-Once configured, you can ask Claude:
+| Provider | API | Cost | Config key |
+|----------|-----|------|------------|
+| Ollama | /api/chat (native) | Free (local) | `"provider": "ollama"` |
+| Anthropic | Messages API | Paid | `"provider": "anthropic"` |
+| OpenAI | /v1/chat/completions | Paid | `"provider": "openai"` |
+| xAI | /v1/chat/completions | Paid | `"provider": "xai"` |
 
-- "Evaluate `3 factorial` in Smalltalk"
-- "Browse the OrderedCollection class"
-- "Show me the source of String>>asUppercase"
-- "Show me the class method MCPServer class>>version"
-- "What are the subclasses of Collection?"
-- "Create a new class called Counter with an instance variable 'count'"
+### Transport Options
 
-## Environment Variables
+| Transport | How | Use Case |
+|-----------|-----|----------|
+| `stdio` | Launches VM as subprocess | Simplest — **recommended** |
+| `daemon` | Unix socket to a running VM | Keep image running with GUI |
+| `mqtt` | MQTT broker to remote image | Remote images, distributed setups |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MQTT_BROKER` | `localhost` | MQTT broker hostname |
-| `MQTT_PORT` | `1883` | MQTT broker port |
-| `MQTT_USERNAME` | (none) | MQTT authentication username |
-| `MQTT_PASSWORD` | (none) | MQTT authentication password |
-| `CLAUDE_IMAGE_ID` | `dev1` | Target Smalltalk image identifier |
-| `CLAUDE_TIMEOUT` | `30` | Response timeout in seconds |
+**stdio** is the default. The agent launches the Smalltalk VM, communicates over stdin/stdout, and shuts it down when done. With Squeak, the VM opens with a GUI window — you can use the Squeak IDE alongside Claude.
 
-## MQTT Topics
+**daemon** connects to an already-running image via a Unix socket. Useful when you want the image to stay open between Claude conversations.
 
-- **Requests**: `claude/request/{imageId}` - JSON requests from Claude
-- **Responses**: `claude/response/{requestId}` - JSON responses from Smalltalk
+**mqtt** connects through an MQTT broker. Used for remote images or Cuis with the SeagullLLM handler.
 
-## Testing
+### Native MCP (no agent)
 
-### Test MQTT Connectivity
+For direct Claude-to-VM communication without the agent layer:
 
-```bash
-# Subscribe to all topics (verify broker access)
-mosquitto_sub -h your-broker -u your-user -P 'your-pass' -t '#' -v
-
-# In another terminal, test the Python bridge
-export MQTT_BROKER=your-broker
-export MQTT_USERNAME=your-user
-export MQTT_PASSWORD=your-pass
-python claudeCuis_mcp.py
+```json
+{
+  "mcpServers": {
+    "smalltalkDirect": {
+      "command": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
+      "args": ["/Applications/ClaudeSqueak.image", "--mcp"]
+    }
+  }
+}
 ```
 
-### Run Smalltalk Tests
+Claude drives the tools directly — no model isolation, no agent loop. Simpler but less powerful.
 
-```smalltalk
-"Unit tests (no broker needed)"
-MQTTPacketTest buildSuite run inspect.
-ClaudeHandlerTest buildSuite run inspect.
+## macOS Permissions
 
-"Integration tests (requires running broker)"
-MQTTIntegrationTest configureBroker: 'your-broker' port: 1883 username: 'user' password: 'pass'.
-MQTTConnectionTest buildSuite run inspect.
-```
+macOS Transparency, Consent, and Control (TCC) restricts which directories applications can access. Claude Desktop's MCP subprocess inherits these restrictions.
 
-## Troubleshooting
+**Safe locations** (no extra permissions needed):
+- `/Applications/` — recommended for VM and image files
+- `~/` (home directory root) — works for config files
+- `~/Library/Application Support/Claude/` — always accessible
 
-### MCP Server Won't Start
+**Restricted locations** (will cause "Operation not permitted" errors):
+- `~/Documents/`
+- `~/Desktop/`
+- `~/Downloads/`
 
-- Ensure Python 3.10+ is being used: `python3 --version`
-- Verify the path to the venv Python is correct
-- Check MCP dependencies: `pip list | grep mcp`
+**Recommended setup on macOS:**
+1. Put Squeak/Cuis VM in `/Applications/`
+2. Put the image file alongside the VM or in `/Applications/`
+3. Put `smalltalk-mcp.json` in your home directory (`~/smalltalk-mcp.json`) or in the extension directory
 
-### MQTT Connection Issues
+**Alternative:** Grant Claude Desktop "Full Disk Access" in System Settings → Privacy & Security, but this is a broader permission than most users need.
 
-- Test broker connectivity: `mosquitto_sub -h broker -u user -P pass -t '#'`
-- Verify credentials and ACL permissions on the broker
-- Check firewall allows port 1883
+## Other Integration Options
 
-### No Response from Smalltalk
+| Option | Architecture | Guide |
+|--------|-------------|-------|
+| OpenAI / ChatGPT | ChatGPT ↔ Python ↔ Squeak | [OPENAI-SETUP.md](OPENAI-SETUP.md) |
+| OpenClaw | Telegram/Discord ↔ OpenClaw ↔ Squeak | [OPENCLAW-SETUP.md](OPENCLAW-SETUP.md) |
 
-- Ensure ClaudeHandler is started in Cuis
-- Verify the `imageId` matches between config and handler
-- Check MQTT subscription topics have proper ACL access
+## Security
 
-### Squeak GUI Freezes (Option C)
+The extension only connects to a local Smalltalk image. It does not access files, network, or system resources beyond communicating with the VM process and your configured LLM provider.
 
-- Verify OSProcess is installed: `OSProcess thisOSProcess` should return a UnixProcess
-- Check that `BufferedAsyncFileReadStream` is being used by MCPTransport
-- See [SQUEAK-SETUP.md](SQUEAK-SETUP.md) for troubleshooting details
+With Ollama + stdio transport, **no Smalltalk source code leaves your machine**.
+
+Dual security audit (xAI Grok + OpenAI GPT-5.2) details: [SECURITY.md](SECURITY.md)
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `MCP-Server.pck.st` | Native MCP server for Cuis (Option B) |
-| `MCP-Server-Squeak.st` | Native MCP server for Squeak 6.0 (Option C) |
-| `ClaudeCuis.image` | Pre-built image with MCP server (Cuis) |
-| `SQUEAK-SETUP.md` | Step-by-step guide for Squeak setup |
-| `claudeCuis_mcp.py` | Python MCP bridge server (Option A) |
-| `openai_mcp.py` | OpenAI bridge for ChatGPT (Option D) |
-| `openai_tools.py` | OpenAI tool definitions (Option D) |
-| `OPENAI-SETUP.md` | Step-by-step guide for OpenAI setup |
-| `clawdbot/` | Clawdbot skill files (Option E) |
-| `clawdbot/SKILL.md` | Clawdbot skill definition |
-| `clawdbot/smalltalk.py` | Clawdbot wrapper with --check and --debug |
-| `CLAWDBOT-SETUP.md` | Step-by-step guide for Clawdbot setup |
-| `requirements.txt` | Python dependencies (Options A & D) |
-| `MQTT-Cuis.pck.st` | MQTT client library for Cuis (Option A) |
-| `ClaudeCuis.pck.st` | Claude handler (Option A) |
-| `*-Tests.pck.st` | Test packages |
-| `examples/` | Configuration templates |
+| `Claude.SmalltalkInterface.mcpb` | Desktop extension — double-click to install |
+| `CLAUDE-README-MCPB.md` | Setup guide bundled with the extension |
+| `smalltalk_agent_mcp.py` | MCP server (JSON-RPC over stdio) |
+| `smalltalk_agent.py` | Agent with tool-calling loop |
+| `smalltalk-mcp-example.json` | Starter config — copy and edit |
+| `SKILL.md` | Drag into Claude Desktop for Smalltalk best practices |
+| `MCP-Server.pck.st` | Native MCP server package for Cuis |
+| `MCP-Server-Squeak.st` | Native MCP server fileIn for Squeak 6.0 |
+| `ClaudeCuis.pck.st` | MCP server package for Cuis (load into your image) |
+| `examples/` | Config examples for all providers and transports |
+
+## Building the Desktop Extension
+
+If you want to build the `.mcpb` package yourself:
+
+```bash
+npm install -g @anthropic-ai/mcpb
+mcpb pack
+```
+
+This creates `Claude.SmalltalkInterface.mcpb` from the files listed in the manifest (excluding everything in `.mcpbignore`).
 
 ## License
 
-MIT License
+MIT License — see [LICENSE](LICENSE)

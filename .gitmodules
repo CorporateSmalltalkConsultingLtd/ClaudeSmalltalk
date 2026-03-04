@@ -1,0 +1,3 @@
+[submodule "OSProcess"]
+	path = OSProcess
+	url = https://github.com/Cuis-Smalltalk/OSProcess.git

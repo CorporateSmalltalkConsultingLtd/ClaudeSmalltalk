@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "description": "Example: xAI Grok provider",
+  "model": {
+    "provider": "xai",
+    "name": "grok-4-1-fast-reasoning",
+    "maxTokens": 256000,
+    "apiKeyEnv": "XAI_API_KEY"
+  },
+  "vm": {
+    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
+    "cuis": "/Applications/CuisVM.app/Contents/MacOS/Squeak"
+  },
+  "image": {
+    "selected": "squeak",
+    "squeak": "ClaudeSqueak.image",
+    "cuis": "ClaudeCuis.image"
+  },
+  "transport": {
+    "type": "daemon",
+    "timeout": 180
+  }
+}

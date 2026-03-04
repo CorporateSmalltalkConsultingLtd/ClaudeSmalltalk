@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "description": "Example: OpenAI provider",
+  "model": {
+    "provider": "openai",
+    "name": "gpt-4.1",
+    "maxTokens": 256000,
+    "apiKeyEnv": "OPENAI_API_KEY"
+  },
+  "vm": {
+    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
+    "cuis": "/Applications/CuisVM.app/Contents/MacOS/Squeak"
+  },
+  "image": {
+    "selected": "squeak",
+    "squeak": "ClaudeSqueak.image",
+    "cuis": "ClaudeCuis.image"
+  },
+  "transport": {
+    "type": "daemon",
+    "timeout": 180
+  }
+}

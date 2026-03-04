@@ -83,7 +83,7 @@ Smalltalk addToStartUpList: MCPServer.
 
 This registers MCPServer in the startup list. On image launch, `MCPServer startUp:` checks for:
 - **`--mcp` flag**: Original Claude Code MCP mode (forked background process)
-- **`SMALLTALK_MCP_DAEMON=1` env var**: Daemon mode (inline, blocking — used by Clawdbot)
+- **`SMALLTALK_MCP_DAEMON=1` env var**: Daemon mode (inline, blocking — used by OpenClaw)
 
 ## Step 7: Verify
 
@@ -202,7 +202,7 @@ Claude Code ←─stdio/JSON-RPC─→ Squeak VM (forked background process)
 ### Daemon Mode (`SMALLTALK_MCP_DAEMON=1`)
 
 ```
-Clawdbot ←─Unix socket─→ smalltalk-daemon.py ←─stdio─→ Squeak VM (inline)
+OpenClaw ←─Unix socket─→ smalltalk-daemon.py ←─stdio─→ Squeak VM (inline)
                                                           │
                                                           ├─ MCPTransport
                                                           └─ MCPServer (14 tools)

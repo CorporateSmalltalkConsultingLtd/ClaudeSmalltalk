@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "cuisDirect": {
-      "type": "stdio",
-      "command": "/path/to/CuisVM.app/Contents/MacOS/Squeak",
-      "args": ["/path/to/ClaudeCuis.image", "--mcp"]
-    }
-  }
-}
