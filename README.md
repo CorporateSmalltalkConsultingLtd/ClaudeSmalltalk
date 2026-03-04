@@ -6,7 +6,7 @@ Developed by John M McIntosh, Corporate Smalltalk Consulting Ltd. 2026
 
 ## What It Does
 
-Claude gets 15 Smalltalk tools — evaluate code, browse classes, read/write methods, navigate hierarchies, and run an autonomous agent that delegates Smalltalk reasoning to a configurable LLM (Ollama for free/local, or Anthropic/OpenAI/xAI).
+Claude gets 13 Smalltalk tools — evaluate code, browse classes, read/write methods, navigate hierarchies, and run an autonomous agent that delegates Smalltalk reasoning to a configurable LLM (Ollama for free/local, or Anthropic/OpenAI/xAI).
 
 ```
 You → Claude Desktop → Smalltalk Agent → Your LLM → Live Smalltalk Image
@@ -96,8 +96,6 @@ If you see class names returned, you're connected.
 | `smalltalk_subclasses` | Get immediate subclasses |
 | `smalltalk_list_categories` | List all system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
-| `smalltalk_save_image` | Save the current image (dev mode only) |
-| `smalltalk_save_as_new_version` | Save as next version number (dev mode only) |
 
 ## Configuration Reference
 

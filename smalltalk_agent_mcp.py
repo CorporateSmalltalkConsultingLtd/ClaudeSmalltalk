@@ -3,15 +3,15 @@
 Smalltalk Agent MCP Server
 
 An MCP server that wraps the Smalltalk Agent, exposing both:
-- 14 fine-grained tools (evaluate, browse, method_source, etc.) for quick one-off operations
+- 12 fine-grained tools (evaluate, browse, method_source, etc.) for quick one-off operations
 - 1 high-level `smalltalk_task` tool that runs the full agent loop with model isolation
 
-The agent loop uses the LLM configured in .smalltalk-mcp.json, NOT the chat session's LLM.
+The agent loop uses the LLM configured in smalltalk-mcp.json, NOT the chat session's LLM.
 This means Claude Desktop can trigger Smalltalk work that runs on Ollama (free/local) or
 any other configured provider.
 
 Configuration:
-    Set SMALLTALK_MCP_CONFIG env var to point to your .smalltalk-mcp.json,
+    Set SMALLTALK_MCP_CONFIG env var to point to your smalltalk-mcp.json,
     or place it in the working directory.
 
 Claude Desktop config (claude_desktop_config.json):
@@ -21,7 +21,7 @@ Claude Desktop config (claude_desktop_config.json):
                 "command": "python3",
                 "args": ["/path/to/smalltalk_agent_mcp.py"],
                 "env": {
-                    "SMALLTALK_MCP_CONFIG": "/path/to/.smalltalk-mcp.json"
+                    "SMALLTALK_MCP_CONFIG": "/path/to/smalltalk-mcp.json"
                 }
             }
         }
@@ -63,7 +63,7 @@ class MCPServer:
 
     SERVER_INFO = {
         "name": "smalltalk-agent",
-        "version": "1.0.0",
+        "version": "2.0.0",
     }
 
     def __init__(self, config_path: str | None = None):
@@ -95,7 +95,7 @@ class MCPServer:
             self._bridge_initialized = True
 
     def _build_tool_list(self) -> list[dict]:
-        """Build the MCP tools/list response with all 14 tools + smalltalk_task."""
+        """Build the MCP tools/list response with all 12 fine-grained tools + smalltalk_task."""
         tools = []
 
         # The high-level agent task tool
@@ -103,7 +103,7 @@ class MCPServer:
             "name": "smalltalk_task",
             "description": (
                 "Run a complex Smalltalk task using an autonomous agent loop. "
-                "The agent uses the LLM configured in .smalltalk-mcp.json (e.g. Ollama) "
+                "The agent uses the LLM configured in smalltalk-mcp.json (e.g. Ollama) "
                 "to reason about and interact with the live Smalltalk image. "
                 "Use this for multi-step tasks like reviewing a class, auditing code, "
                 "or building new features. For simple one-off operations (evaluate an "
@@ -121,7 +121,7 @@ class MCPServer:
             },
         })
 
-        # The 14 fine-grained tools
+        # The 12 fine-grained tools
         for tool in AGENT_TOOLS:
             tools.append({
                 "name": tool["name"],

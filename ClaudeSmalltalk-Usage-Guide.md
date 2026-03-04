@@ -33,7 +33,7 @@ It's not a simulator or a toy. It connects to a real, live image with full syste
 - Want an always-on AI agent that can interact with Smalltalk via messaging (Telegram, Discord)? Use **E** (OpenClaw).
 - Want Smalltalk reasoning isolated to a specific model (e.g. free Ollama), independent of your chat LLM? Use **F** (Smalltalk Agent).
 
-## The 14 Tools
+## The 13 Tools
 
 **Evaluate:**
 - `smalltalk_evaluate` — Execute arbitrary Smalltalk code, return the result
@@ -54,8 +54,6 @@ It's not a simulator or a toy. It connects to a real, live image with full syste
 - `smalltalk_delete_class` — Remove a class
 
 **Image Management (dev mode only):**
-- `smalltalk_save_image` — Save image in place
-- `smalltalk_save_as_new_version` — Save as next version number
 
 ## Configuration
 

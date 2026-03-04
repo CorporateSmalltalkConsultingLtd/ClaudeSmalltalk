@@ -2,7 +2,7 @@
 """
 Smalltalk Agent — an LLM-driven coding agent for live Smalltalk images.
 
-Reads .smalltalk-mcp.json to determine:
+Reads smalltalk-mcp.json to determine:
   - Which LLM reasons about Smalltalk code (model config)
   - How to connect to the Smalltalk image (transport config)
 
@@ -13,7 +13,7 @@ tool against the live image.
 Usage:
     # CLI mode
     python smalltalk_agent.py "review the Random class"
-    python smalltalk_agent.py --config /path/to/.smalltalk-mcp.json "add a SecureRandom class"
+    python smalltalk_agent.py --config /path/to/smalltalk-mcp.json "add a SecureRandom class"
 
     # As a module (for MCP integration)
     from smalltalk_agent import SmalltalkAgent
@@ -48,7 +48,7 @@ MAX_TURNS = 30  # safety limit on agent loop iterations
 
 
 def load_config(config_path: str | None = None) -> dict:
-    """Load .smalltalk-mcp.json, searching upward from cwd if not specified."""
+    """Load smalltalk-mcp.json, searching upward from cwd if not specified."""
     if config_path:
         p = Path(config_path)
     else:
@@ -389,7 +389,7 @@ class StdioBridge:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "smalltalk-agent", "version": "1.0.0"},
+                "clientInfo": {"name": "smalltalk-agent", "version": "2.0.0"},
             },
         }
         await self._send(init_request)
@@ -616,11 +616,11 @@ class SmalltalkAgent:
         model_config = self.config.get("model", {})
         provider = model_config.get("provider")
         if not provider:
-            print("Error: 'model.provider' is required in .smalltalk-mcp.json", file=sys.stderr)
+            print("Error: 'model.provider' is required in smalltalk-mcp.json", file=sys.stderr)
             sys.exit(1)
         name = model_config.get("name")
         if not name:
-            print("Error: 'model.name' is required in .smalltalk-mcp.json", file=sys.stderr)
+            print("Error: 'model.name' is required in smalltalk-mcp.json", file=sys.stderr)
             sys.exit(1)
         max_tokens = model_config.get("maxTokens", 8192)
 
@@ -783,6 +783,7 @@ class SmalltalkAgent:
                     "messages": messages,
                     "tools": ollama_tools,
                     "stream": False,
+                    "options": {"num_predict": llm["maxTokens"]},
                 }
 
                 resp = await http.post(url, json=payload)
