@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "description": "Example: Local Ollama provider (zero cost, fully private)",
+  "model": {
+    "provider": "ollama",
+    "name": "qwen3-coder",
+    "baseUrl": "http://localhost:11434",
+    "maxTokens": 256000
+  },
+  "vm": {
+    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
+    "cuis": "/Applications/CuisVM.app/Contents/MacOS/Squeak"
+  },
+  "image": {
+    "selected": "squeak",
+    "squeak": "ClaudeSqueak.image",
+    "cuis": "ClaudeCuis.image"
+  },
+  "transport": {
+    "type": "daemon",
+    "timeout": 180
+  }
+}

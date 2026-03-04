@@ -2,24 +2,15 @@
 venv/
 __pycache__/
 *.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
 
 # macOS
 .DS_Store
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Smalltalk development artifacts
+UserChanges/
 
-# Local configuration (may contain credentials)
-.claude/settings.local.json
-.mcpregistry_github_token
-.mcpregistry_registry_token
-mcp-publisher
-dist/
-*.egg-info/
+# Config file with credentials
+cuisMQTT_config.json
+Squeak6.0-22148-64bit.app/Contents/Resources/SqueakDebug.log
+ClaudeCuis.image
+ClaudeCuis.changes
