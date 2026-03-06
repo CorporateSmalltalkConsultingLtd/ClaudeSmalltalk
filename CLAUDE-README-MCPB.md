@@ -1,13 +1,13 @@
 # Claude Desktop Extension — Setup Guide
 
-Before installing the extension, you need a Smalltalk VM, image, and config file ready.
+Before installing the extension, you need a Squeak VM and image ready.
 
 ## Step 1: Get a Smalltalk VM and Image
 
-**Squeak** (recommended to start):
+**Squeak** (recommended):
 1. Download [Squeak 6.0](https://squeak.org/downloads/) All-in-One
 2. Move the `.app` to `/Applications/`
-3. Follow [SQUEAK-SETUP.md](https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk/blob/master/SQUEAK-SETUP.md) to install the MCP server into the image
+3. Follow [SQUEAK-SETUP.md](https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk/blob/master/SQUEAK-SETUP.md) to install the MCP server into the image and save as `ClaudeSqueak.image`
 
 **Cuis Smalltalk:**
 1. Clone [Cuis-Smalltalk-Dev](https://github.com/Cuis-Smalltalk/Cuis-Smalltalk-Dev)
@@ -18,69 +18,28 @@ Before installing the extension, you need a Smalltalk VM, image, and config file
 
 ## Step 2: Create Your Config File
 
-Create `smalltalk-mcp.json` **before** installing the extension — the installer will ask you to select it.
+Create `smalltalk-mcp.json` **before** installing the extension.
 
-**Where to put it:** Your home directory (`~/smalltalk-mcp.json`) is the simplest choice. Avoid `~/Documents/` or `~/Desktop/` on macOS (TCC restrictions block access from MCP subprocesses).
+**Where to put it:** Your home directory (`~/smalltalk-mcp.json`) is the simplest choice. Avoid `~/Documents/` or `~/Desktop/` on macOS (TCC restrictions).
 
-### Ollama Config (free, local — both VMs)
+Copy a starter from the `examples/` folder and edit the `vm` paths to match your install:
 
-```json
-{
-  "version": "1.0",
-  "model": {
-    "provider": "ollama",
-    "name": "qwen3-coder",
-    "baseUrl": "http://localhost:11434",
-    "maxTokens": 256000
-  },
-  "vm": {
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
-    "cuis": "/Applications/Cuis-Smalltalk-Dev/CuisVM.app/Contents/MacOS/Squeak"
-  },
-  "image": {
-    "selected": "squeak",
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image",
-    "cuis": "/Applications/Cuis-Smalltalk-Dev/CuisImage/ClaudeCuis.image"
-  },
-  "transport": {
-    "type": "stdio",
-    "args": ["--mcp"],
-    "timeout": 180
-  }
-}
+| File | Provider | Cost |
+|------|----------|------|
+| `examples/smalltalk-mcp-ollama.json` | Ollama | Free (local) |
+| `examples/smalltalk-mcp-anthropic.json` | Anthropic Claude | Paid |
+| `examples/smalltalk-mcp-openai.json` | OpenAI GPT-4o | Paid |
+| `examples/smalltalk-mcp-xai.json` | xAI Grok | Paid |
+| `examples/smalltalk-mcp-mqtt.json` | MQTT (remote/Cuis) | — |
+
+```bash
+cp examples/smalltalk-mcp-ollama.json ~/smalltalk-mcp.json
+# Edit vm.binary and vm.image to match your install
 ```
 
-Requires [Ollama](https://ollama.com/) running locally. No API key needed. Change `"selected"` to `"cuis"` to use Cuis instead of Squeak.
-
-### Anthropic Config (both VMs)
-
-```json
-{
-  "version": "1.0",
-  "model": {
-    "provider": "anthropic",
-    "name": "claude-sonnet-4-6",
-    "maxTokens": 256000,
-    "apiKeyEnv": "ANTHROPIC_API_KEY"
-  },
-  "vm": {
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
-    "cuis": "/Applications/Cuis-Smalltalk-Dev/CuisVM.app/Contents/MacOS/Squeak"
-  },
-  "image": {
-    "selected": "squeak",
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image",
-    "cuis": "/Applications/Cuis-Smalltalk-Dev/CuisImage/ClaudeCuis.image"
-  },
-  "transport": {
-    "type": "stdio",
-    "args": ["--mcp"],
-    "timeout": 180
-  }
-}
-```
-
-Set your API key: `export ANTHROPIC_API_KEY=sk-ant-...` (add to `~/.zshrc` to persist).
+The two paths to set:
+- `vm.binary` — path to your VM executable (works for both Squeak and Cuis — both use a binary named `Squeak`)
+- `vm.image` — path to your image file (`ClaudeSqueak.image` for Squeak, `ClaudeCuis.image` for Cuis)
 
 ## Step 3: Install the Extension
 
@@ -89,22 +48,26 @@ Set your API key: `export ANTHROPIC_API_KEY=sk-ant-...` (add to `~/.zshrc` to pe
 3. Click Install
 4. Restart Claude Desktop
 
-Your config selection is saved in:
-```
-~/Library/Application Support/Claude/Claude Extensions Settings/
-```
-
 ## Step 4: Verify
 
 Open Claude Desktop and ask:
 
 > "List all Smalltalk classes that start with String"
 
+On first use, the agent will automatically:
+1. Generate a secure UUID token
+2. Start the Squeak VM with that token
+3. Connect and run your task
+
 If you see class names returned, you're connected.
+
+To save your work:
+> "Save the Smalltalk image"
+> "Save as a new version"
 
 ## Switching Between Squeak and Cuis
 
-Edit your `smalltalk-mcp.json` and change `"selected"` from `"squeak"` to `"cuis"` (or vice versa), then restart Claude Desktop. Both VM paths stay in the config — you only change which one is active.
+Change the `"vm"` paths in your config to point to a different VM and image, then restart Claude Desktop.
 
 ## Troubleshooting
 
@@ -115,13 +78,18 @@ Edit your `smalltalk-mcp.json` and change `"selected"` from `"squeak"` to `"cuis
 **"model.provider is required"**
 - Both `model.provider` and `model.name` must be set in your config
 
-**"Operation not permitted" or VM fails to start**
-- Move VM and image files to `/Applications/` (macOS TCC blocks `~/Documents/` and `~/Desktop/`)
-- Verify the VM path by running it manually in Terminal first
+**Auto-start failed: VM not found**
+- Check the `"vm"` paths in your config exist and are executable
+- Or set `SQUEAK_VM_PATH` and `SQUEAK_IMAGE_PATH` environment variables
+
+**Auto-start failed: did not become ready**
+- VM may need longer to start — check stderr logs in Claude Desktop (Developer → MCP Servers)
+- On Linux, verify `xvfb-run` is installed: `sudo apt install xvfb`
 
 **Ollama connection refused**
 - Start Ollama: `ollama serve`
-- Check the `baseUrl` in your config matches Ollama's address (default: `http://localhost:11434`)
+- Check the `baseUrl` matches Ollama's address (default: `http://localhost:11434`)
+- Pull your model: `ollama pull qwen2.5-coder:32b`
 
 **No tools appearing in Claude Desktop**
 - Restart Claude Desktop after installing

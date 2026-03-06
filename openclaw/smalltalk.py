@@ -2,18 +2,20 @@
 """
 Smalltalk CLI for OpenClaw
 
-Communicates with a Squeak/Cuis MCP server. Supports two modes:
-1. Daemon mode: Connect to running smalltalk-daemon (fast, persistent state)
-2. Exec mode: Start fresh VM per call (fallback if no daemon)
+Communicates with a Squeak MCP server over TCP (MCPTcpTransport).
+The Squeak VM is its own server — no daemon or bridge process needed.
 
 Usage:
     smalltalk.py --check                    # Verify setup
-    smalltalk.py --daemon-status            # Check daemon status
+    smalltalk.py start-vm                   # Start Squeak VM with TCP transport
     smalltalk.py evaluate "3 factorial"
     smalltalk.py browse OrderedCollection
     smalltalk.py method-source String asUppercase
 
 Environment Variables:
+    SMALLTALK_TCP_HOST  - TCP host (default: 127.0.0.1)
+    SMALLTALK_TCP_PORT  - TCP port (default: 9876)
+    SMALLTALK_TCP_TOKEN - Auth token (default: auto-generated on start-vm)
     SQUEAK_VM_PATH      - Path to Squeak/Cuis VM executable
     SQUEAK_IMAGE_PATH   - Path to Smalltalk image with MCP server
     LLM_PROVIDER        - Force LLM provider: "xai", "anthropic", or "openai" (auto-detected if not set)
@@ -31,6 +33,7 @@ import glob
 import json
 import os
 import re
+import secrets
 import signal
 import shutil
 import socket
@@ -40,9 +43,14 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-# User-isolated socket path to support multiple users on the same machine
+# TCP defaults
+DEFAULT_TCP_HOST = os.environ.get("SMALLTALK_TCP_HOST", "127.0.0.1")
+DEFAULT_TCP_PORT = int(os.environ.get("SMALLTALK_TCP_PORT", "9876"))
+DEFAULT_TCP_TOKEN = os.environ.get("SMALLTALK_TCP_TOKEN", "")
+
+# Token file for auto-started VMs
 USER = os.environ.get("USER", "unknown")
-DAEMON_SOCKET = f"/tmp/smalltalk-daemon-{USER}.sock"
+TOKEN_FILE = f"/tmp/smalltalk-token-{USER}"
 
 # Search paths for auto-detection
 VM_SEARCH_PATTERNS = [
@@ -85,86 +93,54 @@ def get_paths() -> Tuple[str, str]:
     return vm_path or "", image_path or ""
 
 
-def daemon_available() -> bool:
-    """Check if daemon is running and responsive."""
-    if not os.path.exists(DAEMON_SOCKET):
-        return False
+def tcp_available(host: str = "127.0.0.1", port: int = 9876) -> bool:
+    """Check if a Squeak TCP MCP server is reachable."""
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(2.0)
-            sock.connect(DAEMON_SOCKET)
-            sock.sendall(b'{"tool": "__ping__"}\n')
-            response = sock.recv(4096)
-            return b'"status": "ok"' in response
-    except Exception:
+        with socket.create_connection((host, port), timeout=1.0):
+            return True
+    except (ConnectionRefusedError, OSError):
         return False
 
 
-def start_daemon() -> bool:
-    """Start the daemon on-demand. Returns True if daemon is running after call."""
-    if daemon_available():
-        return True
-    
-    # Find the daemon script (same directory as this script)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    daemon_script = os.path.join(script_dir, "smalltalk-daemon.py")
-    
-    if not os.path.exists(daemon_script):
-        print(f"❌ Daemon script not found: {daemon_script}", file=sys.stderr)
-        return False
-    
-    print("🚀 Starting Smalltalk daemon...", file=sys.stderr)
-    
-    # Start daemon in background using nohup to survive parent exit
+def call_tcp(tool_name: str, arguments: dict,
+             host: str = "127.0.0.1", port: int = 9876,
+             token: str = "", timeout: float = 30.0) -> str:
+    """Call an MCP tool directly over TCP (no daemon/bridge needed)."""
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments}
+    }
+
+    sock = socket.create_connection((host, port), timeout=timeout)
+    sock.settimeout(timeout)
+
     try:
-        subprocess.Popen(
-            ["nohup", sys.executable, daemon_script, "start"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True
-        )
-        
-        # Wait for daemon to become available (up to 30 seconds)
-        for i in range(60):
-            time.sleep(0.5)
-            if daemon_available():
-                print("✅ Daemon started", file=sys.stderr)
-                return True
-        
-        print("❌ Daemon failed to start within timeout", file=sys.stderr)
-        return False
-        
-    except Exception as e:
-        print(f"❌ Failed to start daemon: {e}", file=sys.stderr)
-        return False
+        # JSON-RPC authenticate handshake
+        auth_request = json.dumps({
+            "jsonrpc": "2.0",
+            "method": "authenticate",
+            "params": {"token": token},
+            "id": 0
+        }) + "\n"
+        sock.sendall(auth_request.encode("utf-8"))
+        auth_line = _read_tcp_line(sock, timeout=5.0)
+        if auth_line is None:
+            raise RuntimeError("No auth response from VM")
+        auth = json.loads(auth_line)
+        if "error" in auth:
+            raise RuntimeError(f"Auth failed: {auth['error']}")
 
-
-def call_daemon(tool_name: str, arguments: dict) -> str:
-    """Call a tool via the daemon socket."""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.settimeout(60.0)  # 60 second timeout for slow tool calls
-        sock.connect(DAEMON_SOCKET)
-
-        request = {"tool": tool_name, "arguments": arguments}
+        # Send request
         sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
 
-        # Read response - may come in chunks
-        data = b""
-        while True:
-            try:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
-                if b"\n" in data:
-                    break
-            except socket.timeout:
-                break
+        # Read response
+        resp_line = _read_tcp_line(sock, timeout=timeout)
+        if resp_line is None:
+            raise RuntimeError(f"Timeout after {timeout}s")
 
-        if not data:
-            raise RuntimeError("Empty response from daemon")
-
-        response = json.loads(data.decode("utf-8", errors="replace").strip())
+        response = json.loads(resp_line)
 
         if "error" in response:
             error = response["error"]
@@ -174,21 +150,120 @@ def call_daemon(tool_name: str, arguments: dict) -> str:
 
         result = response.get("result", response)
         content = result.get("content", [])
-
         if content and isinstance(content, list):
             return content[0].get("text", str(result))
         return str(result)
+    finally:
+        sock.close()
+
+
+def _read_tcp_line(sock: socket.socket, timeout: float = 30.0) -> Optional[str]:
+    """Read a single newline-terminated line from a TCP socket."""
+    buf = b""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return None
+        sock.settimeout(min(remaining, 1.0))
+        try:
+            chunk = sock.recv(65536)
+            if not chunk:
+                return None
+            buf += chunk
+            if b"\n" in buf:
+                line, _ = buf.split(b"\n", 1)
+                return line.decode("utf-8").strip()
+        except socket.timeout:
+            continue
+    return None
+
+
+def _get_token() -> str:
+    """Get the TCP auth token. Checks env var, then token file from start-vm."""
+    if DEFAULT_TCP_TOKEN:
+        return DEFAULT_TCP_TOKEN
+    try:
+        with open(TOKEN_FILE) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def start_vm(port: int = DEFAULT_TCP_PORT, token: str = "",
+             dev_mode: bool = False, image_path: str = "") -> bool:
+    """Start the Squeak VM with TCP transport.
+    Returns True if VM is reachable after call."""
+    # Already running?
+    if tcp_available(DEFAULT_TCP_HOST, port):
+        print(f"✅ VM already running on port {port}", file=sys.stderr)
+        return True
+
+    vm_path, default_image = get_paths()
+    if not vm_path or not os.path.exists(vm_path):
+        print("❌ VM not found. Set SQUEAK_VM_PATH", file=sys.stderr)
+        return False
+    if not image_path:
+        image_path = default_image
+    if not image_path or not os.path.exists(image_path):
+        print("❌ Image not found. Set SQUEAK_IMAGE_PATH", file=sys.stderr)
+        return False
+
+    if not token:
+        token = secrets.token_urlsafe(32)
+
+    # Save token so subsequent calls can find it
+    with open(TOKEN_FILE, "w") as f:
+        f.write(token)
+    os.chmod(TOKEN_FILE, 0o600)
+
+    env = os.environ.copy()
+    env["SMALLTALK_TCP_PORT"] = str(port)
+    env["SMALLTALK_TCP_TOKEN"] = token
+    env["SMALLTALK_TCP_HOST"] = "127.0.0.1"
+    if dev_mode:
+        env["SMALLTALK_DEV_MODE"] = "1"
+
+    if shutil.which("xvfb-run"):
+        cmd = ["xvfb-run", "-a", vm_path, image_path]
+    else:
+        cmd = [vm_path, image_path]
+
+    print(f"🚀 Starting Squeak VM (TCP port {port})...", file=sys.stderr)
+    print(f"   VM: {vm_path}", file=sys.stderr)
+    print(f"   Image: {image_path}", file=sys.stderr)
+
+    try:
+        subprocess.Popen(
+            cmd, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, env=env,
+        )
+
+        # Wait for TCP port
+        for _ in range(30):
+            time.sleep(0.5)
+            if tcp_available(DEFAULT_TCP_HOST, port):
+                print(f"✅ VM started on port {port}", file=sys.stderr)
+                return True
+
+        print("❌ VM failed to start within 15s", file=sys.stderr)
+        return False
+
+    except Exception as e:
+        print(f"❌ Failed to start VM: {e}", file=sys.stderr)
+        return False
 def check_setup() -> bool:
     """Verify all dependencies and paths are correct."""
     print("🔍 Checking OpenClaw Smalltalk setup...\n")
     all_ok = True
 
-    # Check daemon status
-    if daemon_available():
-        print("✅ Daemon running (fast mode available)")
+    # Check TCP transport
+    if tcp_available(DEFAULT_TCP_HOST, DEFAULT_TCP_PORT):
+        print(f"✅ Squeak VM running ({DEFAULT_TCP_HOST}:{DEFAULT_TCP_PORT})")
     else:
-        print("ℹ️  Daemon not running (will use exec mode)")
-        print("   Start with: smalltalk-daemon.py start")
+        print(f"ℹ️  Squeak VM not running ({DEFAULT_TCP_HOST}:{DEFAULT_TCP_PORT})")
+        print("   Start with: smalltalk.py start-vm")
 
     print()
 
@@ -227,45 +302,20 @@ def check_setup() -> bool:
             print(f"⚠️  No .sources file in image directory")
             print(f"   May cause dialog popups - symlink SqueakV60.sources to {image_dir}/")
 
-    # Check MCPServer version
-    if all_ok and vm_path and image_path:
+    # Check MCPServer version via TCP if VM is running
+    if tcp_available(DEFAULT_TCP_HOST, DEFAULT_TCP_PORT):
         print()
         print("🔍 Checking MCPServer version...")
         try:
-            # Use daemon if running (avoids spawning second VM)
-            if daemon_available():
-                version_str = call_daemon("smalltalk_evaluate", {"code": "MCPServer version"})
-            else:
-                # No daemon running - spawn a quick VM to check
-                result = subprocess.run(
-                    ["xvfb-run", "-a", vm_path, image_path, "--mcp"],
-                    input='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smalltalk_evaluate","arguments":{"code":"MCPServer version"}}}\n',
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                # Parse response to get version
-                version_str = "0"
-                for line in result.stdout.strip().split('\n'):
-                    if '"result"' in line:
-                        try:
-                            resp = json.loads(line)
-                            content = resp.get("result", {}).get("content", [])
-                            if content:
-                                version_str = content[0].get("text", "0")
-                                break
-                        except (json.JSONDecodeError, ValueError, KeyError):
-                            pass
-            
+            token = _get_token()
+            version_str = call_tcp("smalltalk_evaluate", {"code": "MCPServer version"},
+                                   token=token)
             version = int(version_str)
-            if version >= 2:
-                print(f"✅ MCPServer version: {version}")
+            if version >= 9:
+                print(f"✅ MCPServer version: {version} (TCP transport)")
             else:
-                print(f"⚠️  MCPServer version: {version} (recommend >= 2 for headless define-method)")
+                print(f"⚠️  MCPServer version: {version} (recommend >= 9 for TCP)")
                 print("   Update image with: FileStream fileIn: 'MCP-Server-Squeak.st'")
-                
-        except subprocess.TimeoutExpired:
-            print("⚠️  MCPServer version check timed out")
         except Exception as e:
             print(f"⚠️  Could not check MCPServer version: {e}")
 
@@ -278,118 +328,7 @@ def check_setup() -> bool:
     return all_ok
 
 
-class MCPClient:
-    """Simple MCP client for Smalltalk interaction (exec mode)."""
 
-    def __init__(self, vm_path: str, image_path: str):
-        self.vm_path = vm_path
-        self.image_path = image_path
-        self.process: Optional[subprocess.Popen] = None
-        self._request_id = 0
-
-    def start(self) -> None:
-        """Start the Smalltalk MCP server subprocess."""
-        if self.process is not None:
-            return
-
-        # Use xvfb-run for headless operation
-        cmd = ["xvfb-run", "-a", self.vm_path, self.image_path, "--mcp"]
-
-        self.process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            start_new_session=True,  # Create process group for clean shutdown
-        )
-
-        # Initialize MCP connection
-        self._initialize()
-
-    def stop(self) -> None:
-        """Stop the subprocess and all children (Xvfb, Squeak VM)."""
-        if self.process is not None:
-            try:
-                # Kill the entire process group, not just the wrapper
-                pgid = os.getpgid(self.process.pid)
-                os.killpg(pgid, signal.SIGTERM)
-                self.process.wait(timeout=5)
-            except (ProcessLookupError, OSError):
-                # Already dead
-                pass
-            except subprocess.TimeoutExpired:
-                # Force kill if SIGTERM didn't work
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                except (ProcessLookupError, OSError):
-                    pass
-            self.process = None
-
-    def _next_id(self) -> int:
-        self._request_id += 1
-        return self._request_id
-
-    def _send(self, method: str, params: Optional[dict] = None) -> dict:
-        """Send JSON-RPC request and get response."""
-        if self.process is None:
-            raise RuntimeError("MCP server not started")
-
-        request = {
-            "jsonrpc": "2.0",
-            "id": self._next_id(),
-            "method": method,
-        }
-        if params is not None:
-            request["params"] = params
-
-        self.process.stdin.write(json.dumps(request) + "\n")
-        self.process.stdin.flush()
-
-        # Read response, skipping non-JSON lines (stderr warnings etc)
-        while True:
-            response_line = self.process.stdout.readline()
-            if not response_line:
-                raise RuntimeError("No response from MCP server")
-            response_line = response_line.strip()
-            if response_line.startswith("{"):
-                return json.loads(response_line)
-
-    def _initialize(self) -> None:
-        """Initialize the MCP connection."""
-        response = self._send("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "openclaw-smalltalk", "version": "1.0.0"}
-        })
-
-        if "error" in response:
-            raise RuntimeError(f"MCP init failed: {response['error']}")
-
-        # Send initialized notification
-        self.process.stdin.write(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized"
-        }) + "\n")
-        self.process.stdin.flush()
-
-    def call_tool(self, tool_name: str, arguments: dict) -> str:
-        """Call an MCP tool and return the result."""
-        response = self._send("tools/call", {
-            "name": tool_name,
-            "arguments": arguments
-        })
-
-        if "error" in response:
-            return f"Error: {response['error'].get('message', 'Unknown error')}"
-
-        result = response.get("result", {})
-        content = result.get("content", [])
-
-        if content and isinstance(content, list):
-            return content[0].get("text", str(result))
-        return str(result)
 
 
 def debug_squeak():
@@ -529,10 +468,11 @@ img {{ margin: 10px 0; }}
 
 def print_usage():
     print("Usage: smalltalk.py <command> [args...]")
-    print("\nCommands:")
+    print("\nVM management:")
+    print("  start-vm                     - Start Squeak VM with TCP transport")
     print("  --check                      - Verify setup")
-    print("  --daemon-status              - Check daemon status")
     print("  --debug                      - Debug hung system (SIGUSR1 stack trace)")
+    print("\nSmalltalk tools:")
     print("  evaluate <code>              - Evaluate Smalltalk code")
     print("  browse <className>           - Browse a class")
     print("  method-source <class> <sel>  - Get method source")
@@ -554,25 +494,25 @@ def print_usage():
     print("\nOptions for explain/explain-method:")
     print("  --detail=brief|detailed|step-by-step  (default: brief)")
     print("  --audience=beginner|experienced        (default: experienced)")
-    print("\nSource override (explain-method, audit-comment — bypasses daemon):")
+    print("\nSource override (explain-method, audit-comment):")
     print("  --source <code>        - Pass method source inline")
     print("  --source-file <path>   - Read method source from a file")
     print("  --source-stdin         - Read method source from stdin")
     print("\nOptions for generate-sunit:")
     print("  --class-name <name>    - Custom TestCase class name")
     print("  --force                - Overwrite existing TestCase class")
-    print("\nModes:")
-    print("  If smalltalk-daemon is running, uses fast persistent mode.")
-    print("  Otherwise falls back to exec mode (fresh VM per call).")
+    print("\nTransport:")
+    print("  Connects directly to Squeak VM via TCP (JSON-RPC + token auth).")
+    print("  Start VM first with 'start-vm', or set env vars for a remote VM.")
     print("\nEnvironment:")
+    print("  SMALLTALK_TCP_HOST - TCP host (default: 127.0.0.1)")
+    print("  SMALLTALK_TCP_PORT - TCP port (default: 9876)")
+    print("  SMALLTALK_TCP_TOKEN - Auth token")
     print("  SQUEAK_VM_PATH     - Path to VM (auto-detected if not set)")
     print("  SQUEAK_IMAGE_PATH  - Path to image (auto-detected if not set)")
     print("  XAI_API_KEY        - API key for xAI Grok (preferred)")
-    print("  XAI_MODEL          - xAI model (default: grok-4-1-fast-reasoning)")
     print("  ANTHROPIC_API_KEY  - API key for Anthropic Claude")
-    print("  ANTHROPIC_MODEL    - Anthropic model (default: claude-opus-4-6)")
     print("  OPENAI_API_KEY     - API key for OpenAI (fallback)")
-    print("  OPENAI_MODEL       - OpenAI model (default: gpt-5.1-codex-max)")
     print("  LLM_PROVIDER       - Force provider: 'xai', 'anthropic', or 'openai'")
 
 
@@ -1219,17 +1159,18 @@ def _resolve_source_from_args(args: list[str]) -> Tuple[Optional[str], list[str]
 
 
 def run_tool(tool_name: str, arguments: dict) -> str:
-    """Run a tool - starts daemon on-demand if not running."""
-    # Start daemon if not available (lazy start)
-    if not daemon_available():
-        if not start_daemon():
-            return "Error: Failed to start Smalltalk daemon. Run 'smalltalk.py --check' for setup help"
-    
-    # Use daemon
+    """Run a tool via TCP. Auto-starts VM if not running."""
+    if not tcp_available(DEFAULT_TCP_HOST, DEFAULT_TCP_PORT):
+        if not start_vm():
+            return "Error: Squeak VM not running. Start with: smalltalk.py start-vm"
+
+    token = _get_token()
     try:
-        return call_daemon(tool_name, arguments)
+        return call_tcp(tool_name, arguments,
+                        host=DEFAULT_TCP_HOST, port=DEFAULT_TCP_PORT,
+                        token=token)
     except Exception as e:
-        return f"Error: Daemon call failed: {e}"
+        return f"Error: {e}"
 
 
 def main():
@@ -1244,13 +1185,41 @@ def main():
         success = check_setup()
         sys.exit(0 if success else 1)
 
-    # Handle --daemon-status
-    if command in ("--daemon-status", "--status"):
-        if daemon_available():
-            print("✅ Daemon running (fast mode)")
+    # Handle start-vm
+    if command in ("start-vm", "start"):
+        port = DEFAULT_TCP_PORT
+        token = DEFAULT_TCP_TOKEN
+        dev_mode = "--dev" in sys.argv
+        image_path = ""
+        if "--image" in sys.argv:
+            idx = sys.argv.index("--image")
+            if idx + 1 < len(sys.argv):
+                image_path = sys.argv[idx + 1]
+        if "--port" in sys.argv:
+            idx = sys.argv.index("--port")
+            if idx + 1 < len(sys.argv):
+                port = int(sys.argv[idx + 1])
+        if "--token" in sys.argv:
+            idx = sys.argv.index("--token")
+            if idx + 1 < len(sys.argv):
+                token = sys.argv[idx + 1]
+        success = start_vm(port=port, token=token,
+                          dev_mode=dev_mode, image_path=image_path)
+        sys.exit(0 if success else 1)
+
+    # Handle --status
+    if command in ("--status", "status"):
+        if tcp_available(DEFAULT_TCP_HOST, DEFAULT_TCP_PORT):
+            token = _get_token()
+            try:
+                version = call_tcp("smalltalk_evaluate", {"code": "MCPServer version"},
+                                   token=token)
+                print(f"✅ Squeak VM running ({DEFAULT_TCP_HOST}:{DEFAULT_TCP_PORT}, MCPServer v{version})")
+            except Exception:
+                print(f"✅ Squeak VM reachable ({DEFAULT_TCP_HOST}:{DEFAULT_TCP_PORT})")
         else:
-            print("❌ Daemon not running (exec mode)")
-            print("   Start with: smalltalk-daemon.py start")
+            print(f"❌ Squeak VM not running ({DEFAULT_TCP_HOST}:{DEFAULT_TCP_PORT})")
+            print("   Start with: smalltalk.py start-vm")
         sys.exit(0)
 
     # Handle --debug

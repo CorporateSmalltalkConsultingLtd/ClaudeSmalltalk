@@ -24,9 +24,14 @@ Usage:
 import argparse
 import asyncio
 import json
+import re
 import logging
 import os
+import secrets
+import shutil
+import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -45,6 +50,143 @@ logger = logging.getLogger("smalltalk-agent")
 
 DEFAULT_CONFIG = "smalltalk-mcp.json"
 MAX_TURNS = 30  # safety limit on agent loop iterations
+
+# Token file — shared between smalltalk_agent_mcp.py and the st CLI
+_USER = os.environ.get("USER", os.environ.get("USERNAME", "user"))
+TOKEN_FILE = f"/tmp/smalltalk-token-{_USER}"
+VM_START_TIMEOUT = 60  # seconds to wait for VM to accept TCP connections (macOS needs more)
+
+
+def _read_token_file() -> str:
+    """Read the auto-generated token from the token file (written at VM start)."""
+    try:
+        return Path(TOKEN_FILE).read_text().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def _write_token_file(token: str) -> None:
+    """Write token to the shared token file."""
+    Path(TOKEN_FILE).write_text(token)
+    os.chmod(TOKEN_FILE, 0o600)
+
+
+def _tcp_available(host: str, port: int) -> bool:
+    """Return True if the TCP port is accepting connections."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def _auto_start_vm(host: str, port: int, token: str,
+                   vm_path: str = "", image_path: str = "") -> bool:
+    """Attempt to launch the Squeak VM and wait for TCP to become available.
+
+    VM path and image path are resolved from env vars or common search patterns.
+    Token is passed via SMALLTALK_TCP_TOKEN env var. Returns True if VM is ready.
+    """
+    # Re-use path detection from openclaw/smalltalk.py if available, otherwise search
+    vm_path = vm_path or os.environ.get("SQUEAK_VM_PATH", "")
+    image_path = image_path or os.environ.get("SQUEAK_IMAGE_PATH", "")
+
+    if not vm_path:
+        # Common locations
+        candidates = [
+            "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
+            str(Path.home() / "Squeak6.0-22148-64bit-202312181441-Linux-x64/bin/squeak"),
+        ]
+        # Also search home dir for any squeak binary
+        for pat in [str(Path.home() / "Squeak*/bin/squeak")]:
+            import glob
+            found = sorted(glob.glob(pat))
+            if found:
+                candidates.extend(found)
+        for c in candidates:
+            if os.path.isfile(c) and os.access(c, os.X_OK):
+                vm_path = c
+                break
+
+    if not vm_path:
+        logger.error("Auto-start failed: Squeak VM not found. Set SQUEAK_VM_PATH.")
+        return False
+
+    if not image_path:
+        candidates = [
+            str(Path.home() / "ClaudeSmalltalk/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image"),
+            str(Path.home() / "ClaudeSqueak.image"),
+            "/Applications/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image",
+        ]
+        import glob
+        for pat in [str(Path.home() / "*/ClaudeSqueak.image"), str(Path.home() / "ClaudeSqueak*.image")]:
+            found = sorted(glob.glob(pat))
+            if found:
+                candidates.extend(found)
+        for c in candidates:
+            if os.path.isfile(c):
+                image_path = c
+                break
+
+    if not image_path:
+        logger.error("Auto-start failed: ClaudeSqueak.image not found. Set SQUEAK_IMAGE_PATH.")
+        return False
+
+    logger.info(f"Auto-starting Squeak VM: {vm_path}")
+    logger.info(f"  Image: {image_path}, port: {port}, host: {host}")
+
+    # Pass TCP config via env vars on both platforms.
+    # This avoids the VM treating --tcp as a script filename (first positional
+    # arg after image = script on macOS). Env vars work identically on Linux.
+    env = os.environ.copy()
+    env["SMALLTALK_TCP_PORT"] = str(port)
+    env["SMALLTALK_TCP_TOKEN"] = token
+    env["SMALLTALK_TCP_HOST"] = host
+
+    if shutil.which("xvfb-run"):
+        # Linux: xvfb-run wraps the VM; config via env vars (same as macOS)
+        cmd = ["xvfb-run", "-a", vm_path, image_path]
+    else:
+        # macOS: env vars only — no positional args after image path
+        cmd = [vm_path, image_path]
+
+    # Log to a temp file so startup errors are visible in MCP server logs
+    import tempfile
+    log_path = os.path.join(tempfile.gettempdir(), f"squeak-mcp-{os.getuid()}.log")
+    try:
+        log_fh = open(log_path, "w")
+    except OSError:
+        log_fh = subprocess.DEVNULL
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=log_fh,
+            start_new_session=True,
+        )
+    except Exception as e:
+        logger.error(f"Auto-start failed to launch VM: {e}")
+        return False
+
+    logger.info(f"VM process started (pid={proc.pid}), log: {log_path}")
+
+    # Poll until TCP port is ready or process dies
+    deadline = time.time() + VM_START_TIMEOUT
+    while time.time() < deadline:
+        time.sleep(0.5)
+        if _tcp_available(host, port):
+            logger.info(f"Squeak VM ready on {host}:{port} (pid={proc.pid})")
+            return True
+        if proc.poll() is not None:
+            logger.error(f"Squeak VM process exited early (code={proc.returncode}). Check {log_path}")
+            return False
+
+    logger.error(f"Auto-start: VM did not become ready within {VM_START_TIMEOUT}s. Check {log_path}")
+    return False
 
 
 def load_config(config_path: str | None = None) -> dict:
@@ -72,8 +214,18 @@ def load_config(config_path: str | None = None) -> dict:
 
 
 def resolve_env(config: dict, key: str) -> str | None:
-    """Resolve an env var reference from config. e.g. 'apiKeyEnv' -> os.environ[value]."""
-    env_key = config.get(key)
+    """Resolve an API key from config.
+
+    Lookup order:
+    1. Direct value in 'apiKey' field (key stored in JSON — convenient for macOS/Claude Desktop)
+    2. Env var name in 'apiKeyEnv' field (key stored in environment)
+    """
+    # Direct key value takes priority
+    direct = config.get("apiKey")
+    if direct:
+        return direct
+
+    env_key = config.get(key)  # e.g. 'apiKeyEnv'
     if not env_key:
         return None
     value = os.environ.get(env_key)
@@ -217,7 +369,16 @@ TOOLS = [
             "properties": {
                 "definition": {
                     "type": "string",
-                    "description": "Full Smalltalk class definition expression",
+                    "description": (
+                        "Full Smalltalk class definition expression. "
+                        "MUST include poolDictionaries: '' — Squeak requires the 5-keyword form. "
+                        "Example: "
+                        "Object subclass: #MyClass "
+                        "instanceVariableNames: 'foo bar' "
+                        "classVariableNames: '' "
+                        "poolDictionaries: '' "
+                        "category: 'MyPackage'"
+                    ),
                 }
             },
             "required": ["definition"],
@@ -312,6 +473,16 @@ TOOLS = [
             "required": ["category"],
         },
     },
+    {
+        "name": "smalltalk_save_image",
+        "description": "Save the current Smalltalk image in place.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "smalltalk_save_as_new_version",
+        "description": "Save the image and changes file as the next version number.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 # Map tool names to MQTT actions
@@ -328,7 +499,101 @@ TOOL_TO_ACTION = {
     "smalltalk_subclasses": "subclasses",
     "smalltalk_list_categories": "listCategories",
     "smalltalk_classes_in_category": "classesInCategory",
+    "smalltalk_save_image": "saveImage",
+    "smalltalk_save_as_new_version": "saveAsNewVersion",
 }
+
+def _try_parse_tool_json(text: str) -> dict | None:
+    """Try to parse text as a tool call JSON object. Returns dict or None."""
+    try:
+        data = json.loads(text.strip())
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or "name" not in data:
+        return None
+    name = data["name"]
+    arguments = data.get("arguments", data.get("parameters", {}))
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            arguments = {}
+    return {"name": name, "arguments": arguments}
+
+
+def _extract_json_object(text: str, start: int) -> str | None:
+    """Extract a complete JSON object starting at `start` using brace counting.
+
+    Handles nested braces and strings correctly — regex alternatives can't.
+    """
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if escape:
+            escape = False
+            continue
+        if c == '\\' and in_string:
+            escape = True
+            continue
+        if c == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def _parse_tool_call_from_content(content: str) -> dict | None:
+    """Parse a tool call from plain-text content when model doesn't use tool_calls.
+
+    Handles:
+    - Pure JSON: {"name": "smalltalk_evaluate", "arguments": {"code": "..."}}
+    - Mixed text+JSON: "Some explanation...\n{"name": "tool", "arguments": {...}}"
+    - Markdown fenced JSON: ```json\n{"name": ...}\n```
+
+    Uses brace-matching (not regex) to correctly handle nested JSON objects.
+    Returns {'name': str, 'arguments': dict} or None.
+    """
+    if not content:
+        return None
+    text = content.strip()
+
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+    # Try 1: whole content is valid JSON tool call
+    parsed = _try_parse_tool_json(text)
+    if parsed:
+        return parsed
+
+    # Try 2: extract first JSON object from mixed text using brace matching
+    for match in re.finditer(r'\{', text):
+        candidate = _extract_json_object(text, match.start())
+        if candidate:
+            parsed = _try_parse_tool_json(candidate)
+            if parsed:
+                return parsed
+
+    return None
+
+
+def _clean_response(content: str) -> str:
+    """Strip JSON tool-call artifacts from a response not parsed as a tool call."""
+    cleaned = re.sub(
+        r'^\s*\{"name"\s*:.*\}\s*$', '', content, flags=re.MULTILINE
+    ).strip()
+    return cleaned if cleaned else content
+
 
 SYSTEM_PROMPT = """\
 You are a Smalltalk expert working with a live Smalltalk image. You have tools \
@@ -350,178 +615,146 @@ Be thorough but efficient with tool calls. Gather what you need, reason about it
 then act. Don't make redundant calls.\
 """
 
+# Used when the Ollama model doesn't support the tools parameter (HTTP 400).
+# The model must output raw JSON tool calls — one per response, no prose.
+CONTENT_FALLBACK_SYSTEM_PROMPT = """\
+You are a Smalltalk expert working with a live Smalltalk image via a tool dispatcher.
 
-# ---------------------------------------------------------------------------
-# Stdio Bridge (native VM — no MQTT)
-# ---------------------------------------------------------------------------
+You do NOT have function-calling support. Instead, output EXACTLY ONE JSON object per \
+response to invoke a tool, then wait for the result. Do not add prose, explanation, or \
+markdown — ONLY the raw JSON object.
 
-class StdioBridge:
-    """Communicate with a Smalltalk image via stdin/stdout JSON-RPC."""
+Format:
+{"name": "<tool_name>", "arguments": {<args>}}
 
-    def __init__(self, vm_path: str, image_path: str, extra_args: list[str] | None = None,
-                 timeout: int = 30):
-        self.vm_path = vm_path
-        self.image_path = image_path
-        self.extra_args = extra_args or ["--mcp"]
-        self.timeout = timeout
-        self.process: asyncio.subprocess.Process | None = None
+Available tools:
+- smalltalk_evaluate: {"code": "<smalltalk expression>"}
+- smalltalk_define_method: {"className": "<ClassName>", "source": "<full method source>"}
+- smalltalk_get_class_info: {"className": "<ClassName>"}
+- smalltalk_list_classes: {}
+- smalltalk_get_method_source: {"className": "<ClassName>", "methodName": "<selector>"}
+- smalltalk_run_tests: {"className": "<ClassName>"}
+- smalltalk_save_image: {}
+- smalltalk_save_as_new_version: {}
 
-    async def connect(self):
-        """Launch the Smalltalk VM as a subprocess."""
-        cmd_args = [self.vm_path, self.image_path] + self.extra_args
-        self.process = await asyncio.create_subprocess_exec(
-            *cmd_args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        logger.info(f"Launched: {' '.join(cmd_args)}")
-
-        # Wait for and handle MCP initialize handshake
-        await self._initialize()
-
-    async def _initialize(self):
-        """Send MCP initialize and wait for response."""
-        init_request = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "smalltalk-agent", "version": "2.0.0"},
-            },
-        }
-        await self._send(init_request)
-        response = await self._recv()
-        logger.info(f"MCP initialized: {response.get('result', {}).get('serverInfo', {})}")
-
-        # Send initialized notification
-        await self._send({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-        })
-
-    async def _send(self, msg: dict):
-        """Send a JSON-RPC message."""
-        line = json.dumps(msg) + "\n"
-        self.process.stdin.write(line.encode())
-        await self.process.stdin.drain()
-
-    async def _recv(self) -> dict:
-        """Read a JSON-RPC response."""
-        while True:
-            line = await asyncio.wait_for(
-                self.process.stdout.readline(), timeout=self.timeout
-            )
-            if not line:
-                raise ConnectionError("Smalltalk VM closed stdout")
-            line = line.decode().strip()
-            if line:
-                return json.loads(line)
-
-    async def request(self, action: str, payload: dict[str, Any],
-                      image_id: str = "dev1") -> dict[str, Any]:
-        """Execute a tool call via JSON-RPC tools/call."""
-        # Map action back to tool name
-        action_to_tool = {v: k for k, v in TOOL_TO_ACTION.items()}
-        tool_name = action_to_tool.get(action, action)
-
-        msg = {
-            "jsonrpc": "2.0",
-            "id": uuid.uuid4().hex[:8],
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": payload,
-            },
-        }
-        await self._send(msg)
-        response = await self._recv()
-
-        result = response.get("result", {})
-        # MCP tools/call returns {content: [{type: "text", text: "..."}]}
-        content = result.get("content", [])
-        if content and isinstance(content, list):
-            text = content[0].get("text", "")
-            # Try to parse as JSON for consistency with MQTT bridge
-            try:
-                return {"result": json.loads(text)}
-            except (json.JSONDecodeError, TypeError):
-                return {"result": text}
-        return result
-
-    def disconnect(self):
-        if self.process:
-            self.process.terminate()
-            logger.info("Smalltalk VM terminated")
+Rules:
+- Output ONLY the JSON object. No explanation before or after.
+- ONE tool call per response.
+- After receiving a tool result, output the NEXT tool call JSON, or if all steps are \
+done output a plain-text summary (no JSON).
+- For multi-step tasks, execute each step in order: one tool call → wait for result → next call.
+"""
 
 
-# ---------------------------------------------------------------------------
-# Daemon Bridge (Unix socket — connects to smalltalk-daemon.py)
-# ---------------------------------------------------------------------------
+class TcpBridge:
+    """Communicate with a Smalltalk image via TCP (MCPTcpTransport).
 
-class DaemonBridge:
-    """Communicate with a Smalltalk image via the local Unix socket daemon."""
+    Each request opens a fresh TCP connection, authenticates with a token,
+    sends a JSON-RPC request, and reads the response. Simple and stateless.
+    """
 
-    def __init__(self, socket_path: str | None = None, timeout: int = 30):
+    def __init__(self, host: str = "127.0.0.1", port: int = 9876,
+                 token: str = "", timeout: int = 30):
         import socket as sock_mod
         self._sock_mod = sock_mod
-        user = os.environ.get("USER", "unknown")
-        self.socket_path = socket_path or f"/tmp/smalltalk-daemon-{user}.sock"
+        self.host = host
+        self.port = port
+        self.token = token
         self.timeout = timeout
+        self._request_id = 0
 
     def connect(self):
-        if not os.path.exists(self.socket_path):
-            raise ConnectionError(f"Daemon socket not found: {self.socket_path}")
-        logger.info(f"Using daemon at {self.socket_path}")
+        """Verify we can reach the TCP server."""
+        try:
+            with self._sock_mod.create_connection((self.host, self.port), timeout=2.0):
+                pass
+            logger.info(f"TCP transport available at {self.host}:{self.port}")
+        except (ConnectionRefusedError, OSError) as e:
+            raise ConnectionError(f"Cannot connect to Squeak TCP server at {self.host}:{self.port}: {e}")
 
     def disconnect(self):
-        pass  # stateless — each request opens/closes
+        pass  # stateless
 
-    def _send_recv(self, request: dict) -> dict:
-        """Send a JSON-RPC request over Unix socket, receive response."""
-        s = self._sock_mod.socket(self._sock_mod.AF_UNIX, self._sock_mod.SOCK_STREAM)
-        s.settimeout(self.timeout)
-        try:
-            s.connect(self.socket_path)
-            data = json.dumps(request) + "\n"
-            s.sendall(data.encode())
-
-            # Read response
-            buf = b""
-            while True:
-                chunk = s.recv(65536)
+    def _read_line(self, sock, timeout: float = 30.0) -> str | None:
+        """Read a single newline-terminated line from socket."""
+        import time
+        buf = b""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            sock.settimeout(min(remaining, 1.0))
+            try:
+                chunk = sock.recv(65536)
                 if not chunk:
-                    break
+                    return None
                 buf += chunk
                 if b"\n" in buf:
-                    break
-            return json.loads(buf.decode().strip())
+                    line, _ = buf.split(b"\n", 1)
+                    return line.decode("utf-8").strip()
+            except self._sock_mod.timeout:
+                continue
+        return None
+
+    def _send_recv(self, method: str, params: dict) -> dict:
+        """Send a JSON-RPC request over TCP with token auth."""
+        self._request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "id": self._request_id,
+            "method": method,
+            "params": params,
+        }
+
+        sock = self._sock_mod.create_connection(
+            (self.host, self.port), timeout=self.timeout
+        )
+        sock.settimeout(self.timeout)
+
+        try:
+            # JSON-RPC authenticate handshake
+            auth_request = json.dumps({
+                "jsonrpc": "2.0",
+                "method": "authenticate",
+                "params": {"token": self.token},
+                "id": 0
+            }) + "\n"
+            sock.sendall(auth_request.encode("utf-8"))
+            auth_line = self._read_line(sock, timeout=5.0)
+            if auth_line is None:
+                return {"error": {"message": "No auth response from VM"}}
+            auth = json.loads(auth_line)
+            if "error" in auth:
+                return {"error": auth["error"]}
+
+            # Send request
+            sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
+
+            # Read response
+            resp_line = self._read_line(sock, timeout=self.timeout)
+            if resp_line is None:
+                return {"error": {"message": f"Timeout after {self.timeout}s"}}
+
+            return json.loads(resp_line)
         finally:
-            s.close()
+            sock.close()
 
     async def request(self, action: str, payload: dict[str, Any],
                       image_id: str = "dev1") -> dict[str, Any]:
-        """Execute a tool call via the daemon's simple protocol.
+        """Execute a tool call via TCP, returning result in bridge-standard format.
 
-        The daemon expects: {"tool": "smalltalk_evaluate", "arguments": {...}}
-        and returns the result directly (not wrapped in JSON-RPC).
+        The TCP transport speaks raw MCP JSON-RPC, so we use tools/call directly.
         """
-        # Map our action names back to tool names
         action_to_tool = {v: k for k, v in TOOL_TO_ACTION.items()}
         tool_name = action_to_tool.get(action, action)
 
-        request = {
-            "tool": tool_name,
-            "arguments": payload,
-        }
-
-        # Run socket I/O in a thread to avoid blocking the event loop
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, self._send_recv, request)
+        response = await loop.run_in_executor(
+            None, self._send_recv, "tools/call",
+            {"name": tool_name, "arguments": payload}
+        )
 
-        # Daemon wraps response in JSON-RPC: {"jsonrpc":"2.0","id":N,"result":{"content":[{"type":"text","text":"..."}]}}
         if "error" in response:
             err = response["error"]
             if isinstance(err, dict):
@@ -546,17 +779,68 @@ class DaemonBridge:
 class SmalltalkAgent:
     """Runs an LLM agent loop against a live Smalltalk image."""
 
-    def __init__(self, config: dict | None = None, config_path: str | None = None):
+    def __init__(self, config: dict | None = None, config_path: str | None = None,
+                 bridge=None):
         self.config = config or load_config(config_path)
-        self.bridge: MqttBridge | None = None
+        self.bridge = bridge
+        self._bridge_external = bridge is not None  # don't disconnect if we didn't create it
         self.image_id = self.config.get("transport", {}).get("imageId", "dev1")
 
     async def _init_bridge(self):
-        """Initialize the transport bridge from config."""
-        transport = self.config.get("transport", {})
-        transport_type = transport.get("type", "mqtt")
+        """Initialize the transport bridge from config.
 
-        if transport_type == "mqtt":
+        Token resolution order (TCP):
+          1. SMALLTALK_TCP_TOKEN env var
+          2. config transport.token (manual/static override)
+          3. Token file /tmp/smalltalk-token-$USER (written by auto-start or st CLI)
+
+        If connection is refused, auto-start the VM using the token from above
+        (generating a fresh UUID if none found), write it to the token file,
+        and retry once.
+        """
+        transport = self.config.get("transport", {})
+        transport_type = transport.get("type", "tcp")
+
+        if transport_type == "tcp":
+            host = transport.get("host", "127.0.0.1")
+            port = transport.get("port", 9876)
+            timeout = transport.get("timeout", 30)
+
+            # Resolve token: env → config → token file
+            token = (
+                os.environ.get("SMALLTALK_TCP_TOKEN")
+                or resolve_env(transport, "tokenEnv")
+                or transport.get("token", "")
+                or _read_token_file()
+            )
+
+            self.bridge = TcpBridge(host=host, port=port, token=token, timeout=timeout)
+
+            try:
+                self.bridge.connect()
+            except ConnectionError:
+                logger.warning("Squeak VM not reachable — attempting auto-start...")
+
+                # Generate a fresh token if we don't have one
+                if not token:
+                    token = str(uuid.uuid4())
+
+                _write_token_file(token)
+                self.bridge.token = token  # update bridge with the token we'll use
+
+                vm_cfg = self.config.get("vm", {})
+                cfg_vm = vm_cfg.get("binary", "") or vm_cfg.get("squeak", "")  # squeak for back-compat
+                cfg_image = vm_cfg.get("image", "")
+                if not _auto_start_vm(host, port, token, cfg_vm, cfg_image):
+                    raise ConnectionError(
+                        f"Squeak VM not running on {host}:{port} and auto-start failed. "
+                        f"Set SQUEAK_VM_PATH and SQUEAK_IMAGE_PATH, or start manually: "
+                        f"SMALLTALK_TCP_PORT={port} SMALLTALK_TCP_TOKEN=<token> squeak ClaudeSqueak.image"
+                    )
+
+                self.bridge.connect()  # retry after VM started
+
+        elif transport_type == "mqtt":
             self.bridge = MqttBridge(
                 broker=transport.get("broker", "localhost"),
                 port=transport.get("port", 1883),
@@ -566,50 +850,8 @@ class SmalltalkAgent:
             )
             self.bridge.connect()
 
-        elif transport_type == "stdio":
-            # Resolve VM path and image path from top-level config
-            vm_config = self.config.get("vm", {})
-            image_config = self.config.get("image", {})
-
-            # Support both formats:
-            #   Old: {"type": "squeak", "path": "ClaudeSqueak.image"}
-            #   New: {"selected": "squeak", "squeak": "ClaudeSqueak.image", "cuis": "ClaudeCuis.image"}
-            image_type = image_config.get("selected") or image_config.get("type")
-            image_path = image_config.get(image_type) if image_type and image_type in image_config else image_config.get("path")
-
-            if not image_type:
-                raise ValueError("stdio transport requires 'image.selected' (or 'image.type') — squeak or cuis — in config")
-            if not image_path:
-                raise ValueError("stdio transport requires image path in config (either 'image.<type>' or 'image.path')")
-
-            vm_path = vm_config.get(image_type)
-            if not vm_path:
-                available = ", ".join(vm_config.keys()) if vm_config else "none configured"
-                raise ValueError(
-                    f"No VM configured for image type '{image_type}'. "
-                    f"Add 'vm.{image_type}' to config. Available VMs: {available}"
-                )
-
-            extra_args = transport.get("args", ["--mcp"])
-
-            self.bridge = StdioBridge(
-                vm_path=vm_path,
-                image_path=image_path,
-                extra_args=extra_args,
-                timeout=transport.get("timeout", 30),
-            )
-            await self.bridge.connect()
-
-        elif transport_type == "daemon":
-            socket_path = transport.get("socketPath")
-            self.bridge = DaemonBridge(
-                socket_path=socket_path,
-                timeout=transport.get("timeout", 30),
-            )
-            self.bridge.connect()
-
         else:
-            raise ValueError(f"Unsupported transport type: {transport_type}. Supported: mqtt, stdio, daemon")
+            raise ValueError(f"Unsupported transport type: {transport_type}. Supported: tcp, mqtt")
 
     def _get_llm_config(self) -> dict:
         """Parse model config into a normalized dict for the agent loop."""
@@ -679,7 +921,8 @@ class SmalltalkAgent:
 
         Returns the LLM's final text response after all tool calls are resolved.
         """
-        await self._init_bridge()
+        if not self.bridge:
+            await self._init_bridge()
         llm = self._get_llm_config()
 
         logger.info(f"Starting agent loop — provider={llm['provider']}, model={llm['model']}, task={task[:80]}...")
@@ -694,7 +937,7 @@ class SmalltalkAgent:
             else:
                 raise ValueError(f"Unknown provider: {llm['provider']}")
         finally:
-            if self.bridge:
+            if self.bridge and not self._bridge_external:
                 self.bridge.disconnect()
 
     # -- Anthropic agent loop ------------------------------------------------
@@ -748,14 +991,19 @@ class SmalltalkAgent:
         logger.warning(f"Agent hit max turns ({MAX_TURNS})")
         return "Error: agent exceeded maximum turns without completing."
 
-    # -- Ollama agent loop (native /api/chat) ---------------------------------
+    # -- Ollama agent loop (OpenAI-compatible /v1/chat/completions) -----------
 
     async def _run_ollama(self, task: str, llm: dict) -> str:
-        """Agent loop using Ollama's native chat API with tool use."""
+        """Agent loop using Ollama's OpenAI-compatible endpoint for reliable tool use.
+
+        Ollama's native /api/chat tool_calls support varies by model — many models
+        return tool calls as plain text content instead of structured tool_calls.
+        The /v1/chat/completions endpoint is more reliable for tool use.
+        """
         import httpx
 
         base_url = llm["baseUrl"].rstrip("/")
-        url = f"{base_url}/api/chat"
+        url = f"{base_url}/v1/chat/completions"
 
         # Convert tools to Ollama function-calling format
         ollama_tools = []
@@ -774,6 +1022,14 @@ class SmalltalkAgent:
             {"role": "user", "content": task},
         ]
 
+        # Some models (e.g. codestral) return 400 when tools are passed.
+        # We detect this on the first call and fall back to tools=None mode,
+        # relying entirely on the content-fallback parser.
+        tools_supported = True
+        # Dedup guard for content-fallback: track (tool, args_hash) pairs seen.
+        # If the same call repeats 3x, the model is looping — force stop.
+        _content_fallback_calls: dict[str, int] = {}
+
         async with httpx.AsyncClient(timeout=180.0) as http:
             for turn in range(MAX_TURNS):
                 logger.info(f"Turn {turn + 1}/{MAX_TURNS}")
@@ -781,27 +1037,76 @@ class SmalltalkAgent:
                 payload = {
                     "model": llm["model"],
                     "messages": messages,
-                    "tools": ollama_tools,
                     "stream": False,
-                    "options": {"num_predict": llm["maxTokens"]},
+                    "max_tokens": llm["maxTokens"],
                 }
+                if tools_supported:
+                    payload["tools"] = ollama_tools
 
                 resp = await http.post(url, json=payload)
+
+                # If model rejects tools (400), retry without them
+                if resp.status_code == 400 and tools_supported and "tools" in payload:
+                    logger.warning("Model returned 400 with tools — switching to content-fallback prompt mode")
+                    tools_supported = False
+                    payload.pop("tools", None)
+                    # Replace system prompt with JSON-only instruction prompt
+                    messages[0] = {"role": "system", "content": CONTENT_FALLBACK_SYSTEM_PROMPT}
+                    payload["messages"] = messages
+                    resp = await http.post(url, json=payload)
+
                 resp.raise_for_status()
                 data = resp.json()
 
-                msg = data["message"]
+                choice = data["choices"][0]
+                msg = choice["message"]
 
                 # Append assistant message to history
                 messages.append(msg)
 
                 tool_calls = msg.get("tool_calls")
-                if not tool_calls:
-                    # Done — return text
-                    logger.info(f"Agent complete after {turn + 1} turns")
-                    return msg.get("content", "")
 
-                # Execute tool calls
+                # Fallback: some Ollama models return tool calls as JSON text
+                # in content instead of structured tool_calls (model-dependent)
+                if not tool_calls:
+                    content = msg.get("content", "")
+                    parsed = _parse_tool_call_from_content(content)
+                    if parsed:
+                        logger.info(f"  Tool (content fallback): {parsed['name']}")
+
+                        # Dedup guard: same (name, args) called too many times → stop
+                        _call_key = f"{parsed['name']}:{json.dumps(parsed['arguments'], sort_keys=True)}"
+                        _content_fallback_calls[_call_key] = _content_fallback_calls.get(_call_key, 0) + 1
+                        if _content_fallback_calls[_call_key] >= 3:
+                            logger.warning(f"  Content fallback: {parsed['name']} called 3x with same args — forcing stop")
+                            return f"(Loop detected — last result from {parsed['name']})"
+
+                        result = await self._execute_tool(parsed["name"], parsed["arguments"])
+                        logger.debug(f"  Result: {result[:200]}")
+
+                        # Inject the VM result and continue the loop so the
+                        # model can execute the next step of a multi-step task.
+                        # The message explicitly tells the model to emit the
+                        # next JSON tool call OR provide a plain-text summary.
+                        # The loop terminates naturally when the model produces
+                        # content with no parseable tool call (plain-text answer).
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"[Tool Result] {parsed['name']} returned:\n"
+                                f"{result}\n\n"
+                                f"If there are more steps to complete, output the next JSON tool call. "
+                                f"If all steps are done, output a plain-text summary — no JSON."
+                            )
+                        })
+                        logger.info(f"  Content fallback: result injected, continuing loop")
+                        continue
+
+                    # Truly done — clean up any JSON artifacts and return
+                    logger.info(f"Agent complete after {turn + 1} turns")
+                    return _clean_response(content)
+
+                # Execute structured tool calls
                 for tc in tool_calls:
                     fn = tc["function"]
                     name = fn["name"]
@@ -818,6 +1123,7 @@ class SmalltalkAgent:
 
                     messages.append({
                         "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
                         "content": result,
                     })
 

@@ -1,23 +1,20 @@
 {
-  "version": "1.0",
-  "description": "Example: xAI Grok provider",
+  "version": "3.0",
+  "description": "xAI Grok as the agent LLM",
   "model": {
     "provider": "xai",
-    "name": "grok-4-1-fast-reasoning",
-    "maxTokens": 256000,
-    "apiKeyEnv": "XAI_API_KEY"
+    "name": "grok-3-mini",
+    "apiKeyEnv": "XAI_API_KEY",
+    "maxTokens": "####"
   },
   "vm": {
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
-    "cuis": "/Applications/CuisVM.app/Contents/MacOS/Squeak"
-  },
-  "image": {
-    "selected": "squeak",
-    "squeak": "ClaudeSqueak.image",
-    "cuis": "ClaudeCuis.image"
+    "image": "/path/to/ClaudeSqueak.image",
+    "binary": "/path/to/Squeak-or-Cuis-VM-binary"
   },
   "transport": {
-    "type": "daemon",
+    "type": "tcp",
+    "host": "127.0.0.1",
+    "port": 9876,
     "timeout": 180
   }
 }
