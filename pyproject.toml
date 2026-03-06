@@ -51,4 +51,5 @@ Repository = "https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk
 exclude = [".mcpregistry*", "mcp-publisher", "*.image", "*.changes"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["smalltalk_agent_mcp", "smalltalk_agent"]
+# Note: smalltalk_agent_mcp.py and smalltalk_agent.py are standalone scripts
+# run via `uv run`, not installable packages.

@@ -37,7 +37,7 @@ Copy a starter config from `examples/` and set your VM paths:
 
 ```bash
 cp examples/smalltalk-mcp-ollama.json smalltalk-mcp.json
-# Edit vm.squeak and vm.image to match your install
+# Edit vm.binary and vm.image to match your install
 ```
 
 The VM auto-starts on first use — no manual launch needed. Token auth is handled automatically.
@@ -62,7 +62,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 }
 ```
 
-Requires Python 3.10+ and `pip install httpx paho-mqtt`.
+Requires Python 3.10+ and `pip install httpx`. For MQTT transport, also: `pip install paho-mqtt`.
 
 ### 4. Verify It Works
 
