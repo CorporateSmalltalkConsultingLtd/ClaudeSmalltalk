@@ -61,7 +61,7 @@ If using MQTT with an external broker, Smalltalk tool results traverse that brok
 
 ### General Recommendations
 
-- Keep `vm.squeak` and `vm.image` paths pointing to trusted images
+- Keep `vm.binary` and `vm.image` paths pointing to trusted images
 - Review any Smalltalk code before saving it to the image
 - Run the Smalltalk VM with minimal system privileges
 - Don't expose port 9876 through your firewall — it's localhost-only by design
