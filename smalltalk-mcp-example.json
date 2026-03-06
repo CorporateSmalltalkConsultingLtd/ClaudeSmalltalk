@@ -1,28 +1,32 @@
 {
-  "version": "1.0",
-  "description": "Starter config — copy to smalltalk-mcp.json and edit paths for your system. See README.md for all options.",
+  "version": "3.0",
+  "description": "Starter config — copy to smalltalk-mcp.json and set vm.binary and vm.image for your system. Use Squeak or Cuis: just point vm.binary at your VM executable and vm.image at your .image file. See examples/ for all provider options.",
+
+  "_model_examples": {
+    "_ollama": {"provider": "ollama", "name": "qwen2.5-coder:32b", "baseUrl": "http://localhost:11434", "maxTokens": "####"},
+    "_openai": {"provider": "openai", "name": "gpt-4o-mini", "apiKey": "sk-...", "maxTokens": "####"},
+    "_xai":    {"provider": "xai",    "name": "grok-4-1-fast-reasoning", "apiKey": "xai-...", "maxTokens": "####"},
+    "_anthropic": {"provider": "anthropic", "name": "claude-haiku-3-5", "apiKey": "sk-ant-...", "maxTokens": "####"},
+    "_note_maxTokens": "Set maxTokens to the model's output token limit — vendor and model specific",
+    "_note_apiKey": "Use apiKey to store the key directly in JSON, or apiKeyEnv: 'MY_API_KEY' to read from environment"
+  },
 
   "model": {
     "provider": "ollama",
-    "name": "qwen3-coder",
+    "name": "qwen2.5-coder:32b",
     "baseUrl": "http://localhost:11434",
-    "maxTokens": 256000
+    "maxTokens": "####"
   },
 
   "vm": {
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
-    "cuis": "/Applications/Cuis-Smalltalk-Dev/CuisVM.app/Contents/MacOS/Squeak"
-  },
-
-  "image": {
-    "selected": "squeak",
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/Resources/ClaudeSqueak.image",
-    "cuis": "/Applications/Cuis-Smalltalk-Dev/CuisImage/ClaudeCuis.image"
+    "binary": "/path/to/Squeak-or-CuisVM-executable",
+    "image": "/path/to/ClaudeSqueak-or-ClaudeCuis.image"
   },
 
   "transport": {
-    "type": "stdio",
-    "args": ["--mcp"],
+    "type": "tcp",
+    "host": "127.0.0.1",
+    "port": 9876,
     "timeout": 180
   }
 }

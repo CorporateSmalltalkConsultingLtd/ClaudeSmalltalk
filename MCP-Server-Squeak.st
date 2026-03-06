@@ -1,132 +1,209 @@
 'From Squeak6.0 [latest update: #22148] on 21 January 2026'!
 
-"MCP Server for Claude Code integration - Squeak 6.0 Port
+"MCP Server for Smalltalk Agent — Squeak 6.0 Port (v3.0.0)
 
-Implements the Model Context Protocol (MCP) over stdio with JSON-RPC 2.0.
-Uses JSON Lines protocol (one JSON message per line, no Content-Length headers).
-Provides 12 tools for Smalltalk interaction (saveImage intentionally excluded from MCP).
+Implements the Model Context Protocol (MCP) over TCP with JSON-RPC 2.0.
+Uses JSON Lines protocol (one JSON message per line).
+Provides 14 tools for Smalltalk interaction.
 
-REQUIRES: OSProcess package for async stdio support.
-Install via: Installer squeakMap install: 'OSProcess'.
+v3.0.0 (JMM-658): TCP localhost transport with token authentication.
+The VM is its own server — no external Python daemon needed.
+Changes file always enabled (no playground mode).
 
-Uses BufferedAsyncFileReadStream for stdin which provides semaphore-based
-waiting, allowing the GUI to remain responsive while the MCP server waits
-for input from Claude Code.
+REQUIRES: OSProcess package for environment variable access.
+Install via: Installer ss project: 'OSProcess'; install: 'OSProcess'.
 
 Usage:
   1. File in this code into a Squeak image
   2. Register startup: Smalltalk addToStartUpList: MCPServer
   3. Save the image
-  4. Run with --mcp flag:
-     squeak myImage.image --mcp
+  4. Run: SMALLTALK_TCP_PORT=9876 SMALLTALK_TCP_TOKEN=<uuid> squeak image.image
 
-Claude Code config (~/.claude.json):
-  {
-    'mcpServers': {
-      'squeakDirect': {
-        'type': 'stdio',
-        'command': '/path/to/Squeak',
-        'args': ['/path/to/ClaudeMCP-Squeak.image', '--mcp']
-      }
-    }
-  }
+The MCP Python server auto-starts the VM with these env vars set.
 "!
 
 SystemOrganization addCategory: #'MCP-Server'!
 
 Object subclass: #MCPServer
-	instanceVariableNames: 'transport running'
+	instanceVariableNames: 'running'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'MCP-Server'!
 
-!MCPServer commentStamp: 'Claude 1/21/2026 12:00' prior: 0!
-MCP Server for Claude Code integration.
+!MCPServer commentStamp: 'jmm 3/5/2026 00:00' prior: 0!
+MCP Server for Smalltalk Agent (v3.0.0).
 
-Implements the Model Context Protocol (MCP) over stdio with JSON-RPC 2.0.
-Provides 12 tools for Smalltalk code interaction.
+Implements the Model Context Protocol (MCP) over TCP with JSON-RPC 2.0.
+Provides 14 tools for Smalltalk code interaction.
 
-Start the server by running the image with --mcp flag.
+Start with: SMALLTALK_TCP_PORT=9876 SMALLTALK_TCP_TOKEN=<uuid> squeak image.image!
 
-Uses BufferedAsyncFileReadStream for responsive GUI while waiting for input.!
-
-Object subclass: #MCPTransport
-	instanceVariableNames: 'stdin stdout'
+Object subclass: #MCPTCPTransport
+	instanceVariableNames: 'listenSocket port token running connections'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'MCP-Server'!
 
-!MCPTransport commentStamp: 'Claude 1/21/2026 12:00' prior: 0!
-Transport layer for MCP using JSON Lines protocol over stdio.
+!MCPTCPTransport commentStamp: 'jmm 3/5/2026 00:00' prior: 0!
+TCP transport for MCP Server (JMM-658).
+Listens on 127.0.0.1:port, authenticates connections with a shared token.
+Each accepted connection is handled in its own Smalltalk process.
+Replaces the Unix socket Python daemon — the VM is its own server.!
 
-Uses OSProcess BufferedAsyncFileReadStream for stdin which provides
-semaphore-based waiting. This allows the VM scheduler to run other
-processes (including the UI event loop) while waiting for input.!
+!MCPTCPTransport methodsFor: 'initialization' stamp: 'jmm 3/5/2026 00:00'!
+initializePort: aPort token: aToken
+	"Initialize TCP transport on 127.0.0.1:aPort with shared secret aToken."
+	port := aPort.
+	token := aToken.
+	running := false.
+	connections := OrderedCollection new.! !
 
-!MCPTransport methodsFor: 'initialization' stamp: 'Claude 1/21/2026 12:00'!
-initialize
-	"Initialize using OSProcess for stdio with buffered async reads.
-	BufferedAsyncFileReadStream uses semaphore-based waiting which
-	allows the VM to schedule other processes (like the UI) while waiting for input."
-	stdin := OSProcess thisOSProcess stdIn asBufferedAsyncFileReadStream.
-	stdin setBlocking.  "Use blocking mode with semaphore wait"
-	stdout := OSProcess thisOSProcess stdOut.! !
-
-!MCPTransport methodsFor: 'reading' stamp: 'Claude 1/21/2026 12:00'!
-readLine
-	"Read a line from stdin using buffered async stream.
-	Uses semaphore-based waiting which allows UI to remain responsive."
-	| stream char |
-	stream := String new writeStream.
-	[
-		char := stdin next.
-		char isNil ifTrue: [ ^ nil ].
-		(char = Character cr or: [ char = Character lf ])
-			ifTrue: [ ^ stream contents ].
-		stream nextPut: char
-	] repeat.! !
-
-!MCPTransport methodsFor: 'reading' stamp: 'Claude 1/21/2026 12:00'!
-readMessage
-	"Read a JSON message from stdin"
-	| line |
-	line := self readLine.
-	line isNil ifTrue: [ ^ nil ].
-	line isEmpty ifTrue: [ ^ self readMessage ].
-	^ Json readFrom: line readStream.! !
-
-!MCPTransport methodsFor: 'writing' stamp: 'Claude 1/21/2026 12:00'!
-writeMessage: jsonString
-	"Write a JSON message to stdout, ensuring no embedded newlines"
-	| clean |
-	clean := jsonString copyWithout: Character cr.
-	clean := clean copyWithout: Character lf.
-	stdout
-		nextPutAll: clean;
-		nextPut: Character lf;
-		flush.! !
-
-!MCPServer methodsFor: 'initialization' stamp: 'Claude 1/21/2026 12:00'!
-initialize
-	transport := MCPTransport new.
-	running := false.! !
-
-!MCPServer methodsFor: 'running' stamp: 'Claude 1/21/2026 12:00'!
-run
-	"Main server loop - read requests, dispatch, write responses"
-	| request response |
+!MCPTCPTransport methodsFor: 'running' stamp: 'jmm 3/5/2026 00:00'!
+start
+	"Start listening for TCP connections on 127.0.0.1:port.
+	 Each authenticated connection gets its own MCPServer instance
+	 running in a separate Smalltalk process."
+	| clientSocket |
+	listenSocket := Socket newTCP.
+	listenSocket listenOn: port backlogSize: 5 interface: #[127 0 0 1].
 	running := true.
-	[ running ] whileTrue: [
-		request := transport readMessage.
-		request
-			ifNil: [ running := false ]
-			ifNotNil: [
-				response := self handleRequest: request.
-				response ifNotNil: [
-					transport writeMessage: (Json render: response) ]]].! !
+	Transcript show: 'MCP TCP Server listening on 127.0.0.1:', port printString; cr.
+	
+	[	[running] whileTrue: [
+			clientSocket := listenSocket waitForAcceptFor: 5.
+			clientSocket ifNotNil: [
+				Transcript show: 'MCP TCP: connection accepted'; cr.
+				self handleConnection: clientSocket ]]
+	] ensure: [
+		listenSocket destroy.
+		Transcript show: 'MCP TCP Server stopped'; cr ].! !
 
-!MCPServer methodsFor: 'running' stamp: 'Claude 1/21/2026 12:00'!
+!MCPTCPTransport methodsFor: 'running' stamp: 'jmm 3/5/2026 00:00'!
 stop
+	"Stop the TCP server and close all connections."
+	running := false.
+	connections do: [:each | 
+		[each close] on: Error do: [:e | "ignore"]].
+	connections := OrderedCollection new.! !
+
+!MCPTCPTransport methodsFor: 'connection handling' stamp: 'jmm 3/5/2026 00:00'!
+handleConnection: clientSocket
+	"Authenticate and then serve a TCP client connection.
+	 Runs in its own forked process."
+	[
+		(self authenticate: clientSocket)
+			ifTrue: [
+				connections add: clientSocket.
+				[self serveConnection: clientSocket]
+					ensure: [
+						connections remove: clientSocket ifAbsent: [].
+						clientSocket destroy.
+						Transcript show: 'MCP TCP: connection closed'; cr ]]
+			ifFalse: [
+				Transcript show: 'MCP TCP: authentication failed, closing'; cr.
+				clientSocket destroy ]
+	] forkAt: Processor userBackgroundPriority named: 'MCP TCP Client'.! !
+
+!MCPTCPTransport methodsFor: 'connection handling' stamp: 'jmm 3/5/2026 00:00'!
+authenticate: clientSocket
+	"Read the first message and verify the token.
+	 Expected: {jsonrpc:'2.0', method:'authenticate', params:{token:'...'}, id:N}
+	 Responds with success or error, returns true/false."
+	| line request method params clientToken id |
+	
+	"Wait for auth message with 10 second timeout"
+	line := self readLineFrom: clientSocket timeout: 10.
+	line ifNil: [ ^ false ].
+	
+	[request := Json readFrom: line readStream]
+		on: Error do: [:e | ^ false].
+	
+	method := request at: 'method' ifAbsent: [''].
+	id := request at: 'id' ifAbsent: [nil].
+	method = 'authenticate' ifFalse: [ ^ false ].
+	
+	params := request at: 'params' ifAbsent: [Dictionary new].
+	clientToken := params at: 'token' ifAbsent: [''].
+	
+	clientToken = token ifTrue: [
+		"Send success response"
+		id ifNotNil: [
+			self writeLine: (Json render: (Dictionary new
+				at: 'jsonrpc' put: '2.0';
+				at: 'id' put: id;
+				at: 'result' put: (Dictionary new at: 'authenticated' put: true; yourself);
+				yourself))
+			to: clientSocket ].
+		^ true ].
+	
+	"Send error and reject"
+	id ifNotNil: [
+		self writeLine: (Json render: (Dictionary new
+			at: 'jsonrpc' put: '2.0';
+			at: 'id' put: id;
+			at: 'error' put: (Dictionary new
+				at: 'code' put: -32600;
+				at: 'message' put: 'Authentication failed';
+				yourself);
+			yourself))
+		to: clientSocket ].
+	^ false.! !
+
+!MCPTCPTransport methodsFor: 'connection handling' stamp: 'jmm 3/5/2026 00:00'!
+serveConnection: clientSocket
+	"Serve an authenticated TCP connection with an MCPServer instance.
+	 Reads JSON-RPC requests, dispatches to MCPServer, writes responses."
+	| server line request response |
+	server := MCPServer new.
+	
+	[clientSocket isConnected] whileTrue: [
+		line := self readLineFrom: clientSocket timeout: 300.
+		line ifNil: [ ^ self "client disconnected" ].
+		line isEmpty ifFalse: [
+			[	request := Json readFrom: line readStream.
+				response := server handleRequest: request.
+				response ifNotNil: [
+					self writeLine: (Json render: response) to: clientSocket ]
+			] on: Error do: [:e |
+				| errResp |
+				errResp := server errorResponse: (request ifNotNil: [request at: 'id' ifAbsent: [nil]])
+					code: -32603 message: e printString.
+				self writeLine: (Json render: errResp) to: clientSocket ]]].! !
+
+!MCPTCPTransport methodsFor: 'io' stamp: 'mcp 3/5/2026 16:35'!
+readLineFrom: aSocket timeout: seconds
+	"Read a line (terminated by LF) from a socket with timeout.
+	 Returns nil if socket closed or timed out.
+	 Socket>>receiveAvailableData returns a String (not ByteArray).
+	 Socket>>waitForDataFor: signals exceptions, not Booleans.
+	 Use waitForDataFor:ifClosed:ifTimedOut: with block callbacks."
+	| stream data |
+	stream := String new writeStream.
+	
+	[aSocket isConnected] whileTrue: [
+		aSocket 
+			waitForDataFor: seconds 
+			ifClosed: [^ nil] 
+			ifTimedOut: [^ nil].
+		data := aSocket receiveAvailableData.
+		data isEmpty ifTrue: [ ^ nil "closed" ].
+		1 to: data size do: [:i |
+			| char |
+			char := data at: i.
+			char = Character lf ifTrue: [ ^ stream contents ].
+			char = Character cr ifFalse: [ stream nextPut: char ]]].
+	^ nil "disconnected"! !
+
+!MCPTCPTransport methodsFor: 'io' stamp: 'jmm 3/5/2026 00:00'!
+writeLine: aString to: aSocket
+	"Write a JSON line terminated by LF to a socket."
+	| clean |
+	clean := aString copyWithout: Character cr.
+	clean := clean copyWithout: Character lf.
+	aSocket sendData: clean, (String with: Character lf).! !
+
+!MCPServer methodsFor: 'initialization' stamp: 'jmm 3/5/2026 00:00'!
+initialize
 	running := false.! !
 
 !MCPServer methodsFor: 'request handling' stamp: 'Claude 1/21/2026 12:00'!
@@ -529,17 +606,23 @@ toolClassesInCategory: args
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
 toolDefineClass: args
-	"Define a new class"
+	"Define a new class.
+	 Squeak requires poolDictionaries: in the definition; inject it if the LLM omits it."
 	| definition |
 	definition := args at: 'definition' ifAbsent: [ '' ].
 	definition isEmpty ifTrue: [ self error: 'No definition provided' ].
+	"Auto-inject poolDictionaries: '' before category: if missing"
+	((definition includesSubString: 'poolDictionaries:') not
+		and: [ definition includesSubString: 'category:' ]) ifTrue: [
+		definition := definition copyReplaceAll: 'category:' with: 'poolDictionaries: '''' category:' ].
 	Compiler evaluate: definition.
 	^ 'Class defined successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
 toolDefineMethod: args
 	"Define or modify a method on a class.
-	 Uses compileSilently: to avoid UI dialogs in headless mode."
+	 Always uses compile:classified: to write source to .changes file.
+	 (JMM-658: playground mode removed, changes always enabled)"
 	| className source category class |
 	className := args at: 'className' ifAbsent: [ '' ].
 	source := args at: 'source' ifAbsent: [ '' ].
@@ -548,7 +631,7 @@ toolDefineMethod: args
 	source isEmpty ifTrue: [ self error: 'No source provided' ].
 	class := Smalltalk at: className asSymbol ifAbsent: [
 		self error: 'Class not found: ', className ].
-	class compileSilently: source classified: category.
+	class compile: source classified: category.
 	^ 'Method defined successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'Claude 1/21/2026 12:00'!
@@ -649,8 +732,7 @@ toolMethodSource: args
 	(target includesSelector: selector asSymbol) ifFalse: [
 		self error: 'Method not found: ', displayName, '>>', selector ].
 	method := target >> selector asSymbol.
-	"Try source file first, fall back to decompilation if .changes is unavailable
-	 (e.g. playground mode where changes → /dev/null)"
+	"Try source file first, fall back to decompilation if .changes is unavailable"
 	^ [ method getSourceFromFile asString ]
 		on: Error
 		do: [ :e | method decompileString ].! !
@@ -668,23 +750,15 @@ toolSubclasses: args
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'jmm 1/29/2026 21:00'!
 toolSaveImage: args
-	"Save the current image in place. Only works in dev mode.
+	"Save the current image in place.
 	Uses headlessSave which skips Cursor/Morphic UI operations."
-	| changesFile |
-	changesFile := SourceFiles at: 2.
-	(changesFile isNil or: [ changesFile name = '/dev/null' ])
-		ifTrue: [ self error: 'Save is only available in dev mode. Start with --dev --image.' ].
 	self class headlessSave.
 	^ 'Image saved: ', Smalltalk imageName.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: 'jmm 1/29/2026 21:00'!
 toolSaveAsNewVersion: args
-	"Save image/changes as next version number. Only works in dev mode.
+	"Save image/changes as next version number.
 	Uses headlessSaveAsNewVersion to avoid UI hangs under xvfb."
-	| changesFile |
-	changesFile := SourceFiles at: 2.
-	(changesFile isNil or: [ changesFile name = '/dev/null' ])
-		ifTrue: [ self error: 'Save is only available in dev mode. Start with --dev --image.' ].
 	self class headlessSaveAsNewVersion.
 	^ 'Saved as new version: ', Smalltalk imageName.! !
 
@@ -708,26 +782,29 @@ getenv: varName
 		env at: varName ifAbsent: [ nil ] ]
 	on: Error do: [ :e | nil ].! !
 
-!MCPServer class methodsFor: 'system startup' stamp: 'jmm 1/30/2026 03:45'!
+!MCPServer class methodsFor: 'system startup' stamp: 'jmm 3/5/2026 00:00'!
+getArgValue: argName
+	"Get the value following a command line argument.
+	 e.g. for '--port 9876', (self getArgValue: '--port') returns '9876'.
+	 Returns nil if the argument is not found or has no value."
+	| args idx |
+	args := Smalltalk arguments.
+	idx := args indexOf: argName.
+	(idx > 0 and: [idx < args size])
+		ifTrue: [ ^ args at: idx + 1 ]
+		ifFalse: [ ^ nil ].! !
+
+!MCPServer class methodsFor: 'system startup' stamp: 'jmm 3/6/2026 00:00'!
 startUp: resuming
-	"Called on image startup. Two modes:
-	 1. --mcp flag: Original Claude Code MCP mode (forked, background)
-	 2. SMALLTALK_MCP_DAEMON=1 env var: Daemon mode (inline, blocking)
-	 
-	 Daemon mode runs during processStartUpList: which fires BEFORE
-	 Project current wakeUpTopWindow — critical for headless operation
-	 under xvfb-run where Morphic operations would block."
-	| args |
+	"Called on image startup.
+	 Starts TCP server if --tcp flag is present OR if SMALLTALK_TCP_PORT
+	 env var is set. Env vars allow launching without positional CLI args,
+	 which avoids the macOS VM treating --tcp as a script filename."
 	resuming ifFalse: [ ^ self ].
 	
-	"Daemon mode — set by smalltalk-daemon.py via env var"
-	(self getenv: 'SMALLTALK_MCP_DAEMON') = '1' ifTrue: [
-		^ self startDaemon ].
-	
-	"Original MCP mode — set by --mcp command line flag"
-	args := Smalltalk arguments.
-	(args includes: '--mcp') ifTrue: [
-		self startServer ].! !
+	((Smalltalk arguments includes: '--tcp') or: [
+		(self getenv: 'SMALLTALK_TCP_PORT') notNil]) ifTrue: [
+		self startTCPServer ].! !
 
 !MCPServer class methodsFor: 'version' stamp: 'jmm 1/30/2026 03:45'!
 version
@@ -740,96 +817,62 @@ version
 	   4 - JMM-512: Dev mode with save_image and save_as_new_version tools
 	   5 - JMM-515: Daemon mode via startUp: (no --doit needed)
 	   6 - JMM-515: Fix getenv: for Squeak (Cuis-only method)
-	   7 - JMM-509: Class-side method support in browse and method-source"
-	^ 7! !
+	   7 - JMM-509: Class-side method support in browse and method-source
+	   8 - JMM-656: toolDefineMethod uses compile:classified: in dev mode for .changes file
+	   9 - JMM-658: TCP transport, token auth, no playground mode (v3.0.0)
+	  10 - JMM-662: Fix MorphicProject>>launchSystemFiles:event: crash on macOS startup
+	  11 - JMM-662: startUp:/startTCPServer fall back to SMALLTALK_TCP_PORT/TOKEN env vars"
+	^ 11! !
 
-!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/30/2026 03:45'!
-startServer
-	"Start the MCP server in a background process.
-	In playground mode: Redirects changes file to /dev/null for safety.
-	In dev mode (SMALLTALK_DEV_MODE=1): Keeps changes file for persistence."
+!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 3/5/2026 00:00'!
+startTCPServer
+	"Start the MCP TCP server (v3.0.0).
+	 Listens on 127.0.0.1:port with token authentication.
+	 Changes file always enabled — no playground mode.
+	 
+	 Config via environment variables (both macOS and Linux):
+	   SMALLTALK_TCP_PORT   (required)
+	   SMALLTALK_TCP_TOKEN  (required)
+	   SMALLTALK_TCP_HOST   (always 127.0.0.1)
+	 
+	 Usage:  SMALLTALK_TCP_PORT=9876 SMALLTALK_TCP_TOKEN=<uuid> squeak image.image
+	 
+	 CLI args (--tcp --port --token) are still accepted for manual invocation
+	 but env vars are preferred — the MCP Python server always uses env vars.
+	 
+	 The TCP server runs in a background process, allowing the
+	 Squeak GUI to remain responsive."
+	| portStr port tokenStr transport |
 	
-	| devMode |
-	
-	"CRITICAL: Refresh OSProcess handles for new VM session (JMM-515).
-	 After image save/restore, OSProcess session ID becomes stale,
-	 causing stdin/stdout to report as closed. This refresh reattaches
-	 the file handles to the current VM session."
+	"Refresh OSProcess handles for new VM session"
 	OSProcess thisOSProcess refreshFromProcessAccessor.
 	
-	devMode := (self getenv: 'SMALLTALK_DEV_MODE') = '1'.
+	portStr := self getArgValue: '--port'.
+	(portStr isNil or: [portStr isEmpty]) ifTrue: [
+		portStr := self getenv: 'SMALLTALK_TCP_PORT' ].
+	(portStr isNil or: [portStr isEmpty]) ifTrue: [
+		Transcript show: 'MCP TCP Server: --port arg or SMALLTALK_TCP_PORT env var required'; cr.
+		^ self ].
+	port := portStr asInteger.
 	
-	devMode 
-		ifTrue: [
-			"Dev mode - keep changes file for persistence"
-			Transcript show: 'MCP Server starting in DEVELOPMENT mode (changes enabled)'; cr ]
-		ifFalse: [
-			"Playground mode - disable changes file for safety"
-			SourceFiles at: 2 put: (FileStream fileNamed: '/dev/null').
-			Transcript show: 'MCP Server starting in PLAYGROUND mode (changes disabled)'; cr ].
-
-	[
-		"Brief delay to let system stabilize"
-		(Delay forMilliseconds: 100) wait.
-		self new run
-	] forkAt: Processor userBackgroundPriority named: 'MCP Server'.! !
-
-!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/30/2026 03:45'!
-startDaemon
-	"Start MCP server for daemon operation.
-	Called from startUp: when SMALLTALK_MCP_DAEMON=1.
-	Runs inline (blocking) at full priority to avoid green thread starvation.
+	tokenStr := self getArgValue: '--token'.
+	(tokenStr isNil or: [tokenStr isEmpty]) ifTrue: [
+		tokenStr := self getenv: 'SMALLTALK_TCP_TOKEN' ].
+	(tokenStr isNil or: [tokenStr isEmpty]) ifTrue: [
+		Transcript show: 'MCP TCP Server: --token arg or SMALLTALK_TCP_TOKEN env var required'; cr.
+		^ self ].
 	
-	Environment variables:
-	  SMALLTALK_MCP_DAEMON=1  - triggers this mode
-	  SMALLTALK_DEV_MODE=1    - keeps .changes file (else /dev/null)
-	  SMALLTALK_CHANGES_PATH  - explicit path for .changes file (dev mode)"
+	"Set author initials to avoid prompt during class/method definition"
+	Utilities authorInitialsPerSe isEmpty ifTrue: [
+		Utilities setAuthorInitials: 'mcp' ].
 	
-	| devMode changesPath |
+	Transcript show: 'MCP TCP Server v3.0.0 starting on 127.0.0.1:', port printString; cr.
 	
-	"Refresh OSProcess handles for new VM session (JMM-515)"
-	OSProcess thisOSProcess refreshFromProcessAccessor.
+	transport := MCPTCPTransport new initializePort: port token: tokenStr.
 	
-	"Fix working directory to match image location (may differ cross-platform).
-	 FileDirectory default uses the OS working directory, which may not match
-	 the image location after cross-platform transfer."
-	OSProcess thisOSProcess processAccessor chDir: (FileDirectory dirPathFor: Smalltalk imageName).
-	
-	devMode := (self getenv: 'SMALLTALK_DEV_MODE') = '1'.
-	
-	devMode 
-		ifTrue: [
-			changesPath := self getenv: 'SMALLTALK_CHANGES_PATH'.
-			(changesPath notNil and: [ changesPath notEmpty ])
-				ifTrue: [ SourceFiles at: 2 put: (FileStream oldFileOrNoneNamed: changesPath) ].
-			Transcript show: 'MCP Daemon starting in DEVELOPMENT mode'; cr ]
-		ifFalse: [
-			SourceFiles at: 2 put: (FileStream fileNamed: '/dev/null').
-			Transcript show: 'MCP Daemon starting in PLAYGROUND mode'; cr ].
-	
-	"Run inline — blocks this process, which is fine since we're in startUp:
-	 and don't want Morphic/wakeUpTopWindow to run anyway"
-	self new run.! !
-
-!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/30/2026 03:45'!
-startServerInline
-	"Start the MCP server inline (no fork).
-	Used by the daemon's --doit to run the server at full priority,
-	avoiding green thread starvation under xvfb-run.
-	Performs the same setup as startServer but runs synchronously."
-	
-	| devMode |
-	
-	devMode := (self getenv: 'SMALLTALK_DEV_MODE') = '1'.
-	
-	devMode 
-		ifTrue: [
-			Transcript show: 'MCP Server starting INLINE in DEVELOPMENT mode (changes enabled)'; cr ]
-		ifFalse: [
-			SourceFiles at: 2 put: (FileStream fileNamed: '/dev/null').
-			Transcript show: 'MCP Server starting INLINE in PLAYGROUND mode (changes disabled)'; cr ].
-
-	self new run.! !
+	[transport start] 
+		forkAt: Processor userBackgroundPriority 
+		named: 'MCP TCP Server'.! !
 
 !MCPServer class methodsFor: 'saving' stamp: 'jmm 1/29/2026 21:10'!
 headlessSaveAsNewVersion
@@ -905,8 +948,21 @@ headlessSave
 	 If image is later restored, result would be true (resuming)."
 	^ result! !
 
-"After filing in, run:
-  Installer squeakMap install: 'OSProcess'.
+!MorphicProject methodsFor: 'launching' stamp: 'jmm 3/6/2026 00:00'!
+launchSystemFiles: fileStreams event: genericMorphicEvent
+	"Handle a number of files the singleton VM was invoked with again.
+	 Guard against empty fileStreams: on macOS the VM sends this event when
+	 launched with an image path argument, but fileStreams may be empty
+	 if the image is already open (it can't be re-opened as a stream)."
+	fileStreams isEmpty ifTrue: [ ^ self ].
+	self flag: #todo. "Do something more useful with the image here, e. g. tell the VM to load it."
+	self inform: ('Cannot start a second instance of Squeak\with the image "{1}"\because the VM is configured as singleton application.' translated withCRs format: {fileStreams first localName}).! !
+
+"Setup (in a Workspace, do it):
+  Installer ss project: 'OSProcess'; install: 'OSProcess'.
+Then file in this .st file, then:
   Smalltalk addToStartUpList: MCPServer.
-  Smalltalk saveImageAs: 'ClaudeMCP-Squeak'.
+  Smalltalk saveAs: 'ClaudeSqueak'.
+Launch with:
+  SMALLTALK_TCP_PORT=9876 SMALLTALK_TCP_TOKEN=<uuid> squeak ClaudeSqueak.image
 "!

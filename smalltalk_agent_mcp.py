@@ -3,7 +3,9 @@
 Smalltalk Agent MCP Server
 
 An MCP server that wraps the Smalltalk Agent, exposing both:
-- 12 fine-grained tools (evaluate, browse, method_source, etc.) for quick one-off operations
+- 14 VM tools (evaluate, browse, method_source, define_class, define_method, delete_method,
+  delete_class, list_classes, hierarchy, subclasses, list_categories, classes_in_category,
+  save_image, save_as_new_version)
 - 1 high-level `smalltalk_task` tool that runs the full agent loop with model isolation
 
 The agent loop uses the LLM configured in smalltalk-mcp.json, NOT the chat session's LLM.
@@ -35,6 +37,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -45,12 +48,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("smalltalk-agent-mcp")
 
-# Import the agent and its components
+# Import the agent
 from smalltalk_agent import (
     SmalltalkAgent,
-    TOOLS as AGENT_TOOLS,
-    TOOL_TO_ACTION,
     load_config,
+    TOKEN_FILE,
+    _write_token_file,
 )
 
 
@@ -63,7 +66,7 @@ class MCPServer:
 
     SERVER_INFO = {
         "name": "smalltalk-agent",
-        "version": "2.0.0",
+        "version": "3.0.0",
     }
 
     def __init__(self, config_path: str | None = None):
@@ -82,59 +85,78 @@ class MCPServer:
                 logger.info(f"Using config from extension directory: {local_config}")
 
         self.config = load_config(self.config_path)
-        self._agent: SmalltalkAgent | None = None
-        self._bridge = None
-        self._bridge_initialized = False
+        self._ensure_token()
 
-    async def _ensure_bridge(self):
-        """Lazily initialize the transport bridge (for direct tool calls)."""
-        if not self._bridge_initialized:
-            self._agent = SmalltalkAgent(config=self.config)
-            await self._agent._init_bridge()
-            self._bridge = self._agent.bridge
-            self._bridge_initialized = True
+    def _ensure_token(self) -> None:
+        """Generate a UUID token at startup if none is configured.
+
+        Token resolution order:
+          1. SMALLTALK_TCP_TOKEN env var (user pre-set for manual VM)
+          2. transport.token in config (static override)
+          3. Generate a fresh UUID, write to token file
+
+        For TCP transport, the auto-start logic in SmalltalkAgent will use
+        the token file when launching the VM. No token needs to be hardcoded
+        in smalltalk-mcp.json.
+        """
+        transport = self.config.get("transport", {})
+        if transport.get("type", "tcp") != "tcp":
+            return  # MQTT handles auth differently
+
+        existing = (
+            os.environ.get("SMALLTALK_TCP_TOKEN")
+            or transport.get("token", "")
+        )
+        if not existing:
+            token = str(uuid.uuid4())
+            _write_token_file(token)
+            logger.info(f"Generated session token → {TOKEN_FILE}")
+            # Inject into config so SmalltalkAgent picks it up via transport.token
+            # (token file is also read as fallback, but explicit is clearer)
+            self.config.setdefault("transport", {})["token"] = token
 
     def _build_tool_list(self) -> list[dict]:
-        """Build the MCP tools/list response with all 12 fine-grained tools + smalltalk_task."""
-        tools = []
+        """Build the MCP tools/list response.
 
-        # The high-level agent task tool
-        tools.append({
+        JMM-657: Only expose smalltalk_task to Claude Desktop.
+        The 14 fine-grained tools (evaluate, browse, method_source, save_image, etc.)
+        are NOT exposed because they would send proprietary Smalltalk source
+        code to Anthropic's servers. smalltalk_task delegates all code
+        interaction to the locally-configured LLM (e.g. Ollama) — source
+        code never leaves the network.
+
+        Fine-grained tools remain available via the st CLI (openclaw/smalltalk.py)
+        which runs entirely locally.
+        """
+        return [{
             "name": "smalltalk_task",
             "description": (
-                "Run a complex Smalltalk task using an autonomous agent loop. "
-                "The agent uses the LLM configured in smalltalk-mcp.json (e.g. Ollama) "
-                "to reason about and interact with the live Smalltalk image. "
-                "Use this for multi-step tasks like reviewing a class, auditing code, "
-                "or building new features. For simple one-off operations (evaluate an "
-                "expression, read a method), use the individual tools instead."
+                "Run a Smalltalk task using an autonomous agent loop. "
+                "The agent uses a locally-configured LLM (e.g. Ollama) to reason "
+                "about and interact with the live Smalltalk image. No source code "
+                "is sent to cloud APIs — all Smalltalk interaction stays local. "
+                "Use for any task: evaluate expressions, review classes, audit code, "
+                "define methods, generate tests, or build features."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "task": {
                         "type": "string",
-                        "description": "Natural language description of the task (e.g. 'Review the Random class')",
+                        "description": "Natural language description of the task (e.g. 'Review the Random class and suggest improvements')",
                     }
                 },
                 "required": ["task"],
             },
-        })
-
-        # The 12 fine-grained tools
-        for tool in AGENT_TOOLS:
-            tools.append({
-                "name": tool["name"],
-                "description": tool["description"],
-                "inputSchema": tool["input_schema"],
-            })
-
-        return tools
+        }]
 
     async def _handle_tool_call(self, name: str, arguments: dict[str, Any]) -> str:
-        """Execute a tool call and return the text result."""
+        """Execute a tool call and return the text result.
+
+        JMM-657: Only smalltalk_task is exposed. All Smalltalk code interaction
+        is delegated to the locally-configured LLM via the agent loop.
+        """
         if name == "smalltalk_task":
-            # Run the full agent loop
             task = arguments.get("task", "")
             if not task:
                 return "Error: 'task' argument is required"
@@ -145,29 +167,7 @@ class MCPServer:
             logger.info(f"Agent loop complete")
             return result
 
-        # Direct tool call — execute against the bridge
-        action = TOOL_TO_ACTION.get(name)
-        if not action:
-            return f"Unknown tool: {name}"
-
-        await self._ensure_bridge()
-        image_id = self.config.get("transport", {}).get("imageId", "dev1")
-
-        try:
-            response = await self._bridge.request(action, arguments, image_id)
-            result = response.get("result", response)
-
-            if isinstance(result, dict) and "error" in result:
-                text = f"Error: {result['error']}"
-                if "stack" in result:
-                    text += f"\n\nStack:\n{result['stack']}"
-                return text
-            elif isinstance(result, (dict, list)):
-                return json.dumps(result, indent=2)
-            else:
-                return str(result)
-        except Exception as e:
-            return f"Tool execution error: {e}"
+        return f"Unknown tool: {name}"
 
     async def _handle_request(self, msg: dict) -> dict | None:
         """Handle a single JSON-RPC request, return response or None for notifications."""
@@ -183,6 +183,44 @@ class MCPServer:
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
                     "serverInfo": self.SERVER_INFO,
+                    "instructions": (
+                        "You are connected to a live Smalltalk image (Squeak or Cuis) via the Smalltalk Agent.\n\n"
+                        "## Available tool\n\n"
+                        "`smalltalk_task` — Delegate any Smalltalk task to a locally-configured LLM agent.\n"
+                        "No source code is sent to Anthropic — all Smalltalk interaction stays local.\n\n"
+                        "## VM tools the agent can use (14 total)\n\n"
+                        "| Tool | Description |\n"
+                        "|------|-------------|\n"
+                        "| `smalltalk_evaluate` | Execute Smalltalk code and return the result |\n"
+                        "| `smalltalk_browse` | Get class metadata: superclass, ivars, instance and class methods |\n"
+                        "| `smalltalk_method_source` | View source of a method (use 'class side' for class-side methods) |\n"
+                        "| `smalltalk_define_class` | Create or modify a class definition |\n"
+                        "| `smalltalk_define_method` | Add or update a method on a class |\n"
+                        "| `smalltalk_delete_method` | Remove a method from a class |\n"
+                        "| `smalltalk_delete_class` | Remove a class from the system |\n"
+                        "| `smalltalk_list_classes` | List classes matching a prefix |\n"
+                        "| `smalltalk_hierarchy` | Get the superclass chain for a class |\n"
+                        "| `smalltalk_subclasses` | Get immediate subclasses of a class |\n"
+                        "| `smalltalk_list_categories` | List all system categories |\n"
+                        "| `smalltalk_classes_in_category` | List classes in a category |\n"
+                        "| `smalltalk_save_image` | Save the current image in place |\n"
+                        "| `smalltalk_save_as_new_version` | Save image/changes as the next version number |\n\n"
+                        "## Example tasks\n\n"
+                        "- \"Review the Random class and suggest improvements\"\n"
+                        "- \"Audit the Set class for correctness\"\n"
+                        "- \"Define a Counter class with increment/decrement methods and SUnit tests\"\n"
+                        "- \"List all classes in the Collections category\"\n"
+                        "- \"Show the superclass hierarchy of OrderedCollection\"\n"
+                        "- \"Evaluate: OrderedCollection new add: 42; yourself\"\n"
+                        "- \"Show the source of OrderedCollection>>add:\"\n"
+                        "- \"Save the Smalltalk image\"\n"
+                        "- \"Save as a new version\"\n\n"
+                        "## Tips\n\n"
+                        "- The agent browses before modifying — you don't need to specify low-level steps.\n"
+                        "- For class-side methods, mention 'class side' in your task.\n"
+                        "- To run tests: ask to 'run SUnit tests for MyClass'.\n"
+                        "- The VM auto-starts on first use; allow up to 30 seconds on first connection.\n"
+                    ),
                 },
             }
 
@@ -278,8 +316,6 @@ class MCPServer:
                 logger.error(f"Server error: {e}", exc_info=True)
 
         logger.info("MCP server shutting down")
-        if self._bridge:
-            self._bridge.disconnect()
 
 
 async def main():

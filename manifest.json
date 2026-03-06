@@ -2,9 +2,9 @@
   "manifest_version": "0.4",
   "name": "smalltalk-agent",
   "display_name": "Smalltalk Agent",
-  "version": "2.0.0",
-  "description": "MCP server for AI interaction with live Smalltalk images (Squeak and Cuis). Browse classes, evaluate expressions, define methods, and run autonomous code review — all against a running Smalltalk image.",
-  "long_description": "Connect Claude to a live Smalltalk programming environment. Supports 13 tools (12 fine-grained + 1 autonomous agent) including class browsing, method source viewing, expression evaluation, method definition, and an autonomous agent mode that delegates Smalltalk reasoning to a configurable LLM (Ollama, Anthropic, OpenAI, or xAI).\n\nSupports three transport modes:\n- **Daemon**: Unix socket to a running Smalltalk process\n- **MQTT**: Remote images via MQTT broker\n- **Stdio**: Launch Smalltalk VM as a subprocess\n\nWorks with Squeak and Cuis Smalltalk images.",
+  "version": "3.0.0",
+  "description": "MCP server for AI interaction with live Smalltalk images (Squeak and Cuis). Delegates Smalltalk tasks to a locally-configured LLM \u2014 no source code leaves your machine. The agent has access to 14 VM tools: evaluate, browse, define, modify, save, and more.",
+  "long_description": "Connect Claude to a live Smalltalk programming environment via a secure agent architecture. All Smalltalk code interaction is handled by a locally-configured LLM (e.g. Ollama) \u2014 no proprietary source code leaves your machine.\n\nClaude sends high-level task descriptions to an autonomous agent that uses your chosen LLM to browse classes, read source, evaluate expressions, and define methods against a running Smalltalk image.\n\nSupports two transport modes:\n- **TCP** (recommended): Token-authenticated TCP connection to Squeak's built-in MCP server\n- **MQTT**: Remote images via MQTT broker\n\nSupports four LLM providers: Ollama (free, local), Anthropic, OpenAI, xAI.\n\nWorks with Squeak and Cuis Smalltalk images.",
   "author": {
     "name": "Corporate Smalltalk Consulting Ltd",
     "url": "https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk"
@@ -21,7 +21,10 @@
     "entry_point": "smalltalk_agent_mcp.py",
     "mcp_config": {
       "command": "uv",
-      "args": ["run", "${__dirname}/smalltalk_agent_mcp.py"],
+      "args": [
+        "run",
+        "${__dirname}/smalltalk_agent_mcp.py"
+      ],
       "env": {
         "SMALLTALK_MCP_CONFIG": "${user_config.config_file}"
       }
@@ -30,26 +33,9 @@
   "tools": [
     {
       "name": "smalltalk_task",
-      "description": "Run a complex Smalltalk task using an autonomous agent loop with a configurable LLM"
-    },
-    {
-      "name": "smalltalk_evaluate",
-      "description": "Evaluate a Smalltalk expression in the live image"
-    },
-    {
-      "name": "smalltalk_browse",
-      "description": "Browse a Smalltalk class (methods, hierarchy, categories)"
-    },
-    {
-      "name": "smalltalk_method_source",
-      "description": "Get the source code of a Smalltalk method"
-    },
-    {
-      "name": "smalltalk_define_method",
-      "description": "Define or modify a method in the live Smalltalk image"
+      "description": "Delegate any Smalltalk task to a locally-configured LLM (e.g. Ollama). The agent has access to 14 VM tools including evaluate, browse, define methods, save image, and more. No source code is sent to Anthropic servers."
     }
   ],
-  "tools_generated": true,
   "user_config": {
     "config_file": {
       "type": "file",
@@ -59,11 +45,23 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "linux", "win32"],
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ],
     "runtimes": {
       "python": ">=3.10"
     }
   },
-  "keywords": ["smalltalk", "squeak", "cuis", "programming", "live-coding", "agent", "ollama"],
+  "keywords": [
+    "smalltalk",
+    "squeak",
+    "cuis",
+    "programming",
+    "live-coding",
+    "agent",
+    "ollama"
+  ],
   "license": "MIT"
 }

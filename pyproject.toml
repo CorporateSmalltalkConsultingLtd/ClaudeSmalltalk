@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-smalltalk"
-version = "2.0.0"
-description = "MCP server for AI interaction with live Smalltalk images (Cuis and Squeak)"
+version = "3.0.0"
+description = "MCP server for AI interaction with live Smalltalk images (Squeak and Cuis)"
 readme = "CLAUDE-README-MCPB.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -18,7 +18,6 @@ keywords = [
     "cuis",
     "squeak",
     "claude",
-    "openai",
     "ai",
     "llm",
     "model-context-protocol"
@@ -36,7 +35,6 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.25.0",
-    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -49,12 +47,8 @@ all = ["anthropic>=0.40.0", "openai>=1.0.0", "paho-mqtt>=2.0.0"]
 Homepage = "https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk"
 Repository = "https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk"
 
-[project.scripts]
-claude-smalltalk = "claude_smalltalk:main"
-openai-smalltalk = "claude_smalltalk.openai_mcp:main"
-
 [tool.hatch.build.targets.sdist]
-exclude = [".mcpregistry*", "mcp-publisher"]
+exclude = [".mcpregistry*", "mcp-publisher", "*.image", "*.changes"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["claude_smalltalk"]
+packages = ["smalltalk_agent_mcp", "smalltalk_agent"]

@@ -1,28 +1,19 @@
 {
-  "version": "1.0",
-  "description": "Example: MQTT transport — connects to Smalltalk image via MQTT broker",
+  "version": "3.0",
+  "description": "MQTT transport — connects to a remote/Cuis image via MQTT broker",
   "model": {
-    "provider": "anthropic",
-    "name": "claude-sonnet-4-6",
-    "maxTokens": 256000,
-    "apiKeyEnv": "ANTHROPIC_API_KEY"
-  },
-  "vm": {
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
-    "cuis": "/Applications/CuisVM.app/Contents/MacOS/Squeak"
-  },
-  "image": {
-    "selected": "cuis",
-    "squeak": "ClaudeSqueak.image",
-    "cuis": "ClaudeCuis.image"
+    "provider": "ollama",
+    "name": "qwen2.5-coder:32b",
+    "baseUrl": "http://localhost:11434",
+    "maxTokens": "####"
   },
   "transport": {
     "type": "mqtt",
-    "broker": "localhost",
+    "broker": "192.168.1.158",
     "port": 1883,
     "usernameEnv": "MQTT_USERNAME",
     "passwordEnv": "MQTT_PASSWORD",
     "imageId": "dev1",
-    "timeout": 180
+    "timeout": 30
   }
 }

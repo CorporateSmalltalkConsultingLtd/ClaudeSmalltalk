@@ -1,23 +1,20 @@
 {
-  "version": "1.0",
-  "description": "Example: OpenAI provider",
+  "version": "3.0",
+  "description": "OpenAI GPT-4o as the agent LLM",
   "model": {
     "provider": "openai",
-    "name": "gpt-4.1",
-    "maxTokens": 256000,
-    "apiKeyEnv": "OPENAI_API_KEY"
+    "name": "gpt-4o",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "maxTokens": "####"
   },
   "vm": {
-    "squeak": "/Applications/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
-    "cuis": "/Applications/CuisVM.app/Contents/MacOS/Squeak"
-  },
-  "image": {
-    "selected": "squeak",
-    "squeak": "ClaudeSqueak.image",
-    "cuis": "ClaudeCuis.image"
+    "image": "/path/to/ClaudeSqueak.image",
+    "binary": "/path/to/Squeak-or-Cuis-VM-binary"
   },
   "transport": {
-    "type": "daemon",
+    "type": "tcp",
+    "host": "127.0.0.1",
+    "port": 9876,
     "timeout": 180
   }
 }
