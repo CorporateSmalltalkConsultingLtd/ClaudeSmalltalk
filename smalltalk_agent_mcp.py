@@ -219,7 +219,7 @@ class MCPServer:
                         "- The agent browses before modifying — you don't need to specify low-level steps.\n"
                         "- For class-side methods, mention 'class side' in your task.\n"
                         "- To run tests: ask to 'run SUnit tests for MyClass'.\n"
-                        "- The VM auto-starts on first use; allow up to 30 seconds on first connection.\n"
+                        "- The VM auto-starts on first use; allow up to 60 seconds on first connection.\n"
                     ),
                 },
             }
