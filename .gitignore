@@ -14,12 +14,3 @@ cuisMQTT_config.json
 Squeak6.0-22148-64bit.app/Contents/Resources/SqueakDebug.log
 ClaudeCuis.image
 ClaudeCuis.changes
-
-# Squeak VM binaries and build artifacts
-sqcogspur64linuxht/
-squeak-vm.tar.gz
-Logs/
-crash.dmp
-restore_varnames.py
-MCP-Server.pck.st.original
-MCP-Server.pck.st.restored
