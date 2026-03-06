@@ -66,7 +66,7 @@ class MCPServer:
 
     SERVER_INFO = {
         "name": "smalltalk-agent",
-        "version": "3.0.0",
+        "version": "3.0.1",
     }
 
     def __init__(self, config_path: str | None = None):

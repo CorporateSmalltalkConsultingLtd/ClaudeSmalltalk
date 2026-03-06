@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "smalltalk-agent",
   "display_name": "Smalltalk Agent",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "MCP server for AI interaction with live Smalltalk images (Squeak and Cuis). Delegates Smalltalk tasks to a locally-configured LLM \u2014 no source code leaves your machine. The agent has access to 14 VM tools: evaluate, browse, define, modify, save, and more.",
   "long_description": "Connect Claude to a live Smalltalk programming environment via a secure agent architecture. All Smalltalk code interaction is handled by a locally-configured LLM (e.g. Ollama) \u2014 no proprietary source code leaves your machine.\n\nClaude sends high-level task descriptions to an autonomous agent that uses your chosen LLM to browse classes, read source, evaluate expressions, and define methods against a running Smalltalk image.\n\nSupports two transport modes:\n- **TCP** (recommended): Token-authenticated TCP connection to Squeak's built-in MCP server\n- **MQTT**: Remote images via MQTT broker\n\nSupports four LLM providers: Ollama (free, local), Anthropic, OpenAI, xAI.\n\nWorks with Squeak and Cuis Smalltalk images.",
   "author": {
