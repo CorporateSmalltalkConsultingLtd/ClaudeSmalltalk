@@ -25,7 +25,7 @@ pip install httpx
 
 If using Anthropic as the agent LLM provider, also: `pip install anthropic`
 
-### Step 2: Create `.smalltalk-mcp.json`
+### Step 2: Create `smalltalk-mcp.json`
 
 Create this file in the ClaudeSmalltalk repo directory. All paths must be absolute.
 

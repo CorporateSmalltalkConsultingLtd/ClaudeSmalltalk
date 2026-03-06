@@ -1,24 +1,20 @@
 {
-  "version": "1.0",
-  "description": "Example: Anthropic provider with stdio transport — agent launches Smalltalk VM directly",
+  "version": "3.0",
+  "description": "Anthropic Claude as the agent LLM",
   "model": {
     "provider": "anthropic",
     "name": "claude-sonnet-4-6",
-    "maxTokens": 256000,
-    "apiKeyEnv": "ANTHROPIC_API_KEY"
+    "apiKeyEnv": "ANTHROPIC_API_KEY",
+    "maxTokens": "####"
   },
   "vm": {
-    "squeak": "/path/to/Squeak6.0-22148-64bit.app/Contents/MacOS/Squeak",
-    "cuis": "/path/to/CuisVM.app/Contents/MacOS/Squeak"
-  },
-  "image": {
-    "selected": "squeak",
-    "squeak": "/path/to/ClaudeSqueak.image",
-    "cuis": "/path/to/ClaudeCuis.image"
+    "image": "/path/to/ClaudeSqueak.image",
+    "binary": "/path/to/Squeak-or-Cuis-VM-binary"
   },
   "transport": {
-    "type": "stdio",
-    "args": ["--mcp"],
+    "type": "tcp",
+    "host": "127.0.0.1",
+    "port": 9876,
     "timeout": 180
   }
 }

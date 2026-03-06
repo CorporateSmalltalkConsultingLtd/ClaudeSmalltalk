@@ -14,7 +14,7 @@ to include it as part of the Cuis distribution. See the [DCO](DCO) file for deta
 ### Reporting Issues
 
 - Check existing issues to avoid duplicates
-- Include your Cuis Smalltalk version and VM version
+- Include your Smalltalk version and VM version
 - Provide steps to reproduce the issue
 - Include relevant error messages or transcripts
 
@@ -28,20 +28,6 @@ to include it as part of the Cuis distribution. See the [DCO](DCO) file for deta
 6. Push to your fork
 7. Open a pull request
 
-### Running Tests
-
-Before submitting, run the test suite:
-
-```smalltalk
-"Unit tests (no broker needed)"
-MQTTPacketTest buildSuite run inspect.
-ClaudeHandlerTest buildSuite run inspect.
-
-"If you have an MQTT broker for integration tests"
-MQTTIntegrationTest configureBroker: 'your-broker' port: 1883 username: 'user' password: 'pass'.
-MQTTConnectionTest buildSuite run inspect.
-```
-
 ## Coding Guidelines
 
 ### Smalltalk Style
@@ -52,27 +38,26 @@ MQTTConnectionTest buildSuite run inspect.
 - Add method comments for non-obvious behavior
 - Use `self` for instance methods, `self class` for class-side access
 
-### Cuis/Squeak-Specific Notes
 
-Cuis and Squeak have some differences from Pharo:
-
-### Python Style (for MCP bridge)
+### Python Style
 
 - Follow PEP 8 conventions
 - Use type hints where helpful
-- Keep the MCP bridge minimal - complex logic belongs in Smalltalk
 
 ## Package Structure
 
-| Package | Purpose |
-|---------|---------|
-| `MCP-Server.pck.st` | Native MCP server for Cuis (Option B) |
-| `MCP-Server-Squeak.st` | Native MCP server for Squeak 6.0 (Option C) |
-| `openai_mcp.py` | OpenAI bridge for ChatGPT (Option D) |
-| `openai_tools.py` | OpenAI tool definitions |
-| `MQTT-Cuis.pck.st` | MQTT client library |
-| `ClaudeCuis.pck.st` | Claude handler for MQTT bridge (Option A) |
+| File | Purpose |
+|------|---------|
+| `MCP-Server-Squeak.st` | TCP MCP server for Squeak 6.0 (v3.0) |
+| `MCP-Server.pck.st` | MCP server package for Cuis |
+| `smalltalk_agent_mcp.py` | MCP server for Claude Desktop (stdio JSON-RPC) |
+| `smalltalk_agent.py` | Agent loop with TcpBridge and MqttBridge |
+| `openclaw/smalltalk.py` | `st` CLI — direct TCP access to all 14 tools |
+| `openclaw/mqtt_bridge.py` | MQTT CLI bridge for Cuis/remote images |
+| `MQTT-Cuis.pck.st` | MQTT client library for Cuis |
+| `ClaudeCuis.pck.st` | Claude handler for MQTT bridge |
 | `*-Tests.pck.st` | Test packages |
+| `examples/` | Config templates for all providers |
 
 ## Questions?
 

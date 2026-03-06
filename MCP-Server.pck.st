@@ -814,7 +814,9 @@ toolDefineClass: args
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
 toolDefineMethod: args
 	"Define or modify a method on a class.
-	 Uses compileSilently: to avoid UI dialogs in headless mode."
+	 In dev mode (SMALLTALK_DEV_MODE=1), uses compile:classified: to write
+	 source to the .changes file. Otherwise uses compileSilently:classified:
+	 to avoid UI dialogs in headless mode."
 	| className source category class |
 	className := args
 		at: 'className'
@@ -830,9 +832,9 @@ toolDefineMethod: args
 	class := Smalltalk
 		at: className asSymbol
 		ifAbsent: [ self error: 'Class not found: ' , className ].
-	class
-		compileSilently: source
-		classified: category.
+	(MCPServer getenv: 'SMALLTALK_DEV_MODE') = '1'
+		ifTrue: [ class compile: source classified: category ]
+		ifFalse: [ class compileSilently: source classified: category ].
 	^ 'Method defined successfully'.! !
 
 !MCPServer methodsFor: 'tool implementations' stamp: ''!
@@ -1043,8 +1045,9 @@ version
 	   11 - Remove debug logging, use correct Cuis author API
 	   12 - JMM-619: Add daemon mode (SMALLTALK_MCP_DAEMON env var) for smalltalk-daemon.py
 	   13 - JMM-645: Remove SourceFiles manipulation — changes file always retained
-	   14 - JMM-645: headlessSave for Cuis, RunningInstance guard, envAt: for cross-platform"
-	^ 14! !
+	   14 - JMM-645: headlessSave for Cuis, RunningInstance guard, envAt: for cross-platform
+	   15 - JMM-655: toolDefineMethod: uses compile:classified: in dev mode for .changes file"
+	^ 15! !
 
 !MCPServer class methodsFor: 'instance creation' stamp: 'jmm 2/20/2026 00:50'!
 startDaemon
