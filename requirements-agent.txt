@@ -1,11 +1,8 @@
 # Python dependencies for Smalltalk Agent
 # Requires Python 3.10+
 
-# Required for all setups
+# Required for all setups (used by all providers: Anthropic, OpenAI, xAI, Ollama)
 httpx>=0.25.0
-
-# Optional — only if model.provider is "anthropic"
-# anthropic>=0.40.0
 
 # Optional — only if transport.type is "mqtt"
 # paho-mqtt>=2.0.0
