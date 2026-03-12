@@ -867,14 +867,15 @@ class SmalltalkAgent:
         max_tokens = model_config.get("maxTokens", 8192)
 
         if provider == "anthropic":
-            try:
-                import anthropic
-            except ImportError:
-                print("Error: 'anthropic' package not installed. Run: pip install anthropic", file=sys.stderr)
-                sys.exit(1)
             api_key = resolve_env(model_config, "apiKeyEnv")
-            client = anthropic.Anthropic(api_key=api_key)
-            return {"provider": "anthropic", "client": client, "model": name, "maxTokens": max_tokens}
+            if not api_key:
+                print(
+                    "Error: Anthropic provider requires an API key. Set 'model.apiKeyEnv' (and the corresponding environment variable) in smalltalk-mcp.json.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            base_url = model_config.get("baseUrl", "https://api.anthropic.com")
+            return {"provider": "anthropic", "baseUrl": base_url, "apiKey": api_key, "model": name, "maxTokens": max_tokens}
 
         elif provider == "ollama":
             base_url = model_config.get("baseUrl", "http://localhost:11434")
@@ -943,50 +944,67 @@ class SmalltalkAgent:
     # -- Anthropic agent loop ------------------------------------------------
 
     async def _run_anthropic(self, task: str, llm: dict) -> str:
-        """Agent loop using Anthropic Messages API with native tool use."""
-        client = llm["client"]
+        """Agent loop using Anthropic Messages API via httpx (no SDK dependency)."""
+        import httpx
+
+        base_url = llm["baseUrl"].rstrip("/")
+        url = f"{base_url}/v1/messages"
+        headers = {
+            "x-api-key": llm["apiKey"],
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
         messages = [{"role": "user", "content": task}]
 
-        for turn in range(MAX_TURNS):
-            logger.info(f"Turn {turn + 1}/{MAX_TURNS}")
+        async with httpx.AsyncClient(timeout=180.0) as http:
+            for turn in range(MAX_TURNS):
+                logger.info(f"Turn {turn + 1}/{MAX_TURNS}")
 
-            response = client.messages.create(
-                model=llm["model"],
-                max_tokens=llm["maxTokens"],
-                system=SYSTEM_PROMPT,
-                tools=TOOLS,
-                messages=messages,
-            )
+                payload = {
+                    "model": llm["model"],
+                    "max_tokens": llm["maxTokens"],
+                    "system": SYSTEM_PROMPT,
+                    "tools": TOOLS,
+                    "messages": messages,
+                }
 
-            if response.stop_reason == "end_turn":
-                text_parts = [
-                    block.text for block in response.content if hasattr(block, "text")
-                ]
-                logger.info(f"Agent complete after {turn + 1} turns")
-                return "\n".join(text_parts)
+                resp = await http.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
 
-            tool_results = []
-            text_parts = []
+                stop_reason = data.get("stop_reason")
+                content = data.get("content", [])
 
-            for block in response.content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-                elif block.type == "tool_use":
-                    logger.info(f"  Tool: {block.name}({json.dumps(block.input)[:100]})")
-                    result = await self._execute_tool(block.name, block.input)
-                    logger.debug(f"  Result: {result[:200]}")
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    })
+                if stop_reason == "end_turn":
+                    text_parts = [
+                        block["text"] for block in content if block.get("type") == "text"
+                    ]
+                    logger.info(f"Agent complete after {turn + 1} turns")
+                    return "\n".join(text_parts)
 
-            if not tool_results:
-                logger.info(f"Agent complete (no more tool calls) after {turn + 1} turns")
-                return "\n".join(text_parts)
+                tool_results = []
+                text_parts = []
 
-            messages.append({"role": "assistant", "content": response.content})
-            messages.append({"role": "user", "content": tool_results})
+                for block in content:
+                    if block.get("type") == "text":
+                        text_parts.append(block["text"])
+                    elif block.get("type") == "tool_use":
+                        logger.info(f"  Tool: {block['name']}({json.dumps(block['input'])[:100]})")
+                        result = await self._execute_tool(block["name"], block["input"])
+                        logger.debug(f"  Result: {result[:200]}")
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block["id"],
+                            "content": result,
+                        })
+
+                if not tool_results:
+                    logger.info(f"Agent complete (no more tool calls) after {turn + 1} turns")
+                    return "\n".join(text_parts)
+
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": tool_results})
 
         logger.warning(f"Agent hit max turns ({MAX_TURNS})")
         return "Error: agent exceeded maximum turns without completing."

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "httpx>=0.25.0",
+# ]
+# ///
 """
 Smalltalk Agent MCP Server
 
@@ -66,7 +72,7 @@ class MCPServer:
 
     SERVER_INFO = {
         "name": "smalltalk-agent",
-        "version": "3.0.1",
+        "version": "3.1.0",
     }
 
     def __init__(self, config_path: str | None = None):

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-smalltalk"
-version = "3.0.1"
+version = "3.1.0"
 description = "MCP server for AI interaction with live Smalltalk images (Squeak and Cuis)"
 readme = "CLAUDE-README-MCPB.md"
 license = {text = "MIT"}
@@ -38,10 +38,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-anthropic = ["anthropic>=0.40.0"]
 mqtt = ["paho-mqtt>=2.0.0"]
-openai = ["openai>=1.0.0"]
-all = ["anthropic>=0.40.0", "openai>=1.0.0", "paho-mqtt>=2.0.0"]
+all = ["paho-mqtt>=2.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk"
