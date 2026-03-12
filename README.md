@@ -62,7 +62,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 }
 ```
 
-Requires Python 3.10+. Dependencies (`httpx`) are resolved automatically by `uv`. Install [uv](https://docs.astral.sh/uv/) if you don't have it: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+Requires Python 3.10+. Dependencies (`httpx`) are resolved automatically by `uv`. Install [uv](https://docs.astral.sh/uv/) if you don't have it by following the official installation instructions there (for example via your package manager where available). If you choose to use an install script, review it first and follow any checksum or signature verification steps described in the `uv` documentation.
 
 > **Alternatively**, if you prefer not to use `uv`, you can use `python3` as the command — but you'll need to install `httpx` yourself (`pip install httpx` or `pip3 install httpx`). For MQTT transport, also: `pip install paho-mqtt`.
 

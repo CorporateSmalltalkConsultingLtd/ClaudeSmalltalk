@@ -868,6 +868,12 @@ class SmalltalkAgent:
 
         if provider == "anthropic":
             api_key = resolve_env(model_config, "apiKeyEnv")
+            if not api_key:
+                print(
+                    "Error: Anthropic provider requires an API key. Set 'model.apiKeyEnv' (and the corresponding environment variable) in smalltalk-mcp.json.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             base_url = model_config.get("baseUrl", "https://api.anthropic.com")
             return {"provider": "anthropic", "baseUrl": base_url, "apiKey": api_key, "model": name, "maxTokens": max_tokens}
 
