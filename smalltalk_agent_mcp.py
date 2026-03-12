@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "httpx>=0.25.0",
+# ]
+# ///
 """
 Smalltalk Agent MCP Server
 
