@@ -1,6 +1,6 @@
 ---
 name: smalltalk-mcp
-description: Interact with live Smalltalk images (Squeak, Cuis) via MCP. Evaluate code, browse classes, view method source, define and modify classes and methods, query hierarchies and categories in a running Smalltalk environment.
+description: "Interact with live Smalltalk images (Squeak, Cuis) via MCP. Evaluate code, browse classes, view method source, define and modify classes and methods, query hierarchies and categories in a running Smalltalk environment. Use when the user wants to interact with a running Smalltalk image, mentions Squeak or Cuis, or needs to evaluate Smalltalk code, browse classes, or modify methods via MCP."
 ---
 
 # Smalltalk MCP Skill
@@ -11,79 +11,13 @@ This skill connects Claude to a live Smalltalk image (Cuis or Squeak) via MCP.
 
 If the Smalltalk MCP tools are not available, help the user configure them:
 
-### Prerequisites
-- Python 3.10+
-- A Smalltalk VM: [Cuis](https://github.com/Cuis-Smalltalk/Cuis-Smalltalk-Dev) or [Squeak](https://squeak.org/downloads/)
-- The ClaudeSmalltalk repository: `git clone https://github.com/CorporateSmalltalkConsultingLtd/ClaudeSmalltalk.git`
-- Build a `ClaudeCuis.image` following CUIS-SETUP.md. For Squeak, see SQUEAK-SETUP.md.
+1. **Install dependencies**: `pip install httpx` (and `pip install anthropic` if using Anthropic as the agent LLM provider)
+2. **Create config**: Copy an example from `examples/` (e.g. `examples/smalltalk-mcp-anthropic.json`) to `.smalltalk-mcp.json` and update all paths to absolute paths. Set your API key via environment variable.
+3. **Configure Claude Desktop**: Copy `examples/claude_desktop_config.json` to `~/Library/Application Support/Claude/claude_desktop_config.json` and update the paths to point to `smalltalk_agent_mcp.py` and your config file.
 
-### Step 1: Install Python dependency
+**Prerequisites**: Python 3.10+, a Smalltalk VM ([Cuis](https://github.com/Cuis-Smalltalk/Cuis-Smalltalk-Dev) or [Squeak](https://squeak.org/downloads/)), and a built image (see CUIS-SETUP.md or SQUEAK-SETUP.md).
 
-```bash
-pip install httpx
-```
-
-If using Anthropic as the agent LLM provider, also: `pip install anthropic`
-
-### Step 2: Create `smalltalk-mcp.json`
-
-Create this file in the ClaudeSmalltalk repo directory. All paths must be absolute.
-
-Example using Anthropic (copy from `examples/smalltalk-mcp-anthropic.json`):
-
-```json
-{
-  "version": "1.0",
-  "model": {
-    "provider": "anthropic",
-    "name": "claude-sonnet-4-6",
-    "maxTokens": 256000,
-    "apiKeyEnv": "ANTHROPIC_API_KEY"
-  },
-  "vm": {
-    "squeak": "/absolute/path/to/Squeak6.0.app/Contents/MacOS/Squeak",
-    "cuis": "/absolute/path/to/CuisVM.app/Contents/MacOS/Squeak"
-  },
-  "image": {
-    "selected": "cuis",
-    "squeak": "/absolute/path/to/ClaudeSqueak.image",
-    "cuis": "/absolute/path/to/ClaudeSmalltalk/ClaudeCuis.image"
-  },
-  "transport": {
-    "type": "stdio",
-    "args": ["--mcp"],
-    "timeout": 180
-  }
-}
-```
-
-The user must set their API key: `export ANTHROPIC_API_KEY=sk-ant-...`
-
-Other provider examples are in the `examples/` folder (Ollama, OpenAI, xAI, MQTT).
-
-### Step 3: Configure Claude Desktop
-
-The user must edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
-
-```json
-{
-  "mcpServers": {
-    "smalltalkAgent": {
-      "command": "python3",
-      "args": ["/absolute/path/to/ClaudeSmalltalk/smalltalk_agent_mcp.py"],
-      "env": {
-        "SMALLTALK_MCP_CONFIG": "/absolute/path/to/ClaudeSmalltalk/.smalltalk-mcp.json"
-      }
-    }
-  }
-}
-```
-
-An example is at `examples/claude_desktop_config.json`. All paths must be absolute.
-
-After saving, Claude Desktop will reload and the 13 Smalltalk tools will become available.
-
----
+After saving the Claude Desktop config, it will reload and the 13 Smalltalk tools will become available.
 
 ## How to use the tools
 
@@ -128,6 +62,11 @@ increment
     ^ count
 ```
 
+**Verify after modifying.** After `smalltalk_define_method` or `smalltalk_define_class`, always confirm the change took effect:
+- Use `smalltalk_method_source` to verify the method was saved correctly
+- Use `smalltalk_browse` to confirm class structure matches expectations
+- If a define call fails, check for Smalltalk syntax errors in the source
+
 **Testing.** After defining methods, verify with `smalltalk_evaluate`:
 ```
 MyClass new increment
@@ -158,3 +97,12 @@ Run SUnit tests: `MyClassTest buildSuite run`
 | `smalltalk_subclasses` | Get immediate subclasses of a class |
 | `smalltalk_list_categories` | List all system categories |
 | `smalltalk_classes_in_category` | List classes in a category |
+
+## Troubleshooting
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Tools not appearing in Claude Desktop | Config path incorrect or not absolute | Verify all paths in `claude_desktop_config.json` are absolute |
+| Connection timeout | Smalltalk image not running or VM path wrong | Start the image first, check VM path in `.smalltalk-mcp.json` |
+| `smalltalk_evaluate` returns error | Smalltalk syntax error in expression | Check Smalltalk syntax — messages use keyword selectors, not parentheses |
+| Class/method not found | Typo or class not loaded in image | Use `smalltalk_list_classes` to search by prefix |
