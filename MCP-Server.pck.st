@@ -1,4 +1,4 @@
-'From Cuis7.7 [latest update: #7777] on 21 January 2026 at 6:20:31 pm'!
+'From Cuis7.9 [latest update: #8056] on 14 July 2026 at 10:34:06 am'!
 'Description MCP Server for Claude Code integration.
 
 Implements the Model Context Protocol (MCP) over stdio with JSON-RPC 2.0.
@@ -28,7 +28,7 @@ Claude Code config (~/.claude.json):
     }
   }
 '!
-!provides: 'MCP-Server' 1 11!
+!provides: 'MCP-Server' 1 12!
 !requires: 'JSON' nil nil nil!
 !requires: 'OSProcess' nil nil nil!
 SystemOrganization addCategory: #'MCP-Server'!
@@ -55,12 +55,12 @@ MCPTransport class
 	instanceVariableNames: ''!
 
 
-!MCPServer methodsFor: 'initialization' stamp: 'jmm 1/26/2026 11:00'!
+!MCPServer methodsFor: 'initialization' stamp: 'jmm 26/Jan/2026, 2:00:00 pm (UTC)'!
 initialize
 	transport := MCPTransport new.
 	running := false.! !
 
-!MCPServer methodsFor: 'running' stamp: 'jmm 1/26/2026 11:00'!
+!MCPServer methodsFor: 'running' stamp: 'jmm 26/Jan/2026, 2:00:00 pm (UTC)'!
 run
 	"Main server loop - read requests, dispatch, write responses"
 	| request response |
@@ -800,7 +800,7 @@ toolClassesInCategory: args
 		c name ]) asArray sorted.
 	^ Json render: names.! !
 
-!MCPServer methodsFor: 'tool implementations' stamp: 'jmm 1/26/2026 09:30'!
+!MCPServer methodsFor: 'tool implementations' stamp: 'jmm 26/Jan/2026, 12:30:00 pm (UTC)'!
 toolDefineClass: args
 	"Define a new class"
 	| definition |
@@ -1002,7 +1002,7 @@ headlessSave
 	 result is true when image is later restored (resumed)."
 	^ result! !
 
-!MCPServer class methodsFor: 'system startup' stamp: 'jmm 2/20/2026 00:50'!
+!MCPServer class methodsFor: 'system startup' stamp: 'jmm 20/Feb/2026, 3:50:00 am (UTC)'!
 startUp: resuming
 	"Called on image startup. Two modes:
 	 1. SMALLTALK_MCP_DAEMON=1 env var: Daemon mode (inline, blocking)
@@ -1027,7 +1027,7 @@ startUp: resuming
 	args := Smalltalk startUpArguments.
 	(args includes: '--mcp') ifTrue: [ self startServer ].! !
 
-!MCPServer class methodsFor: 'version' stamp: 'jmm 2/20/2026 00:50'!
+!MCPServer class methodsFor: 'version' stamp: 'jmm 20/Feb/2026, 3:50:00 am (UTC)'!
 version
 	"Return the MCP server version number.
 	 Increment when making changes that external tools should detect.
@@ -1049,7 +1049,12 @@ version
 	   15 - JMM-655: toolDefineMethod: uses compile:classified: in dev mode for .changes file"
 	^ 15! !
 
-!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 2/20/2026 00:50'!
+!MCPServer class methodsFor: 'instance creation' stamp: 'HAW 14/Jul/2026, 1:10:25 pm (UTC)'!
+setAUthorInitials
+
+	Utilities  setAuthorInitials: 'LLM' name: 'ClaudeSmalltalk'! !
+
+!MCPServer class methodsFor: 'instance creation' stamp: 'HAW 14/Jul/2026, 1:09:41 pm (UTC)'!
 startDaemon
 	"Start MCP server for daemon operation (JMM-619).
 	Called from startUp: when SMALLTALK_MCP_DAEMON=1.
@@ -1064,22 +1069,22 @@ startDaemon
 	  SMALLTALK_DEV_MODE=1    - keeps .changes file (else disabled)"
 	
 	Transcript show: 'MCP Daemon starting'; newLine.
-	Utilities setAuthorName: 'ClaudeSmalltalk' initials: 'LLM'.
-	
+	self setAUthorInitials. 
+
 	"Run inline — blocks this process, which is fine since we are in startUp:
 	 and do not want the Morphic world loop to run before MCP is ready"
 	self new run.! !
 
-!MCPServer class methodsFor: 'instance creation' stamp: 'jmm 1/26/2026 11:00'!
+!MCPServer class methodsFor: 'instance creation' stamp: 'HAW 14/Jul/2026, 1:09:41 pm (UTC)'!
 startServer
 	"Start MCP server in background process, allowing GUI to initialize normally"
-	Utilities setAuthorName: 'ClaudeSmalltalk' initials: 'LLM'.
+	self setAUthorInitials.
 	[
 		(Delay forMilliseconds: 500) wait.
 		self new run
 	] forkAt: Processor userBackgroundPriority named: 'MCP Server'.! !
 
-!MCPTransport methodsFor: 'initialization' stamp: 'jmm 1/26/2026 11:00'!
+!MCPTransport methodsFor: 'initialization' stamp: 'jmm 26/Jan/2026, 2:00:00 pm (UTC)'!
 initialize
 	"Initialize using OSProcess for stdio with buffered async reads.
 	BufferedAsyncFileReadStream uses semaphore-based waiting which
@@ -1122,6 +1127,3 @@ writeMessage: jsonString
 		nextPutAll: clean;
 		newLine;
 		flush.! !
-
-"Register MCPServer for startup"!
-Smalltalk addToStartUpList: MCPServer!
